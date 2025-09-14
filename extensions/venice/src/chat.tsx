@@ -22,6 +22,8 @@ export default function Command() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentId, setCurrentId] = useState<string | undefined>(undefined);
   const [stream, setStream] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [caretOn, setCaretOn] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingSelectIdRef = useRef<string | null>(null);
 
@@ -74,13 +76,26 @@ export default function Command() {
     }
   }
 
+  // Blink caret while streaming
+  useEffect(() => {
+    if (!isStreaming) {
+      setCaretOn(false);
+      return;
+    }
+    const id = setInterval(() => setCaretOn((v) => !v), 500);
+    return () => clearInterval(id);
+  }, [isStreaming]);
+
   function toMarkdown(conv?: Conversation): string {
     if (!conv) return "";
     const parts = conv.messages.map((m) => {
       const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
       return `**${name}:**\n${m.content}`;
     });
-    if (stream) parts.push(`**Venice AI (streaming):**\n${stream}`);
+    if (stream || isStreaming) {
+      const caret = isStreaming && caretOn ? " ▍" : "";
+      parts.push(`**Venice AI (streaming):**\n${stream}${caret}`);
+    }
     return parts.join("\n\n---\n\n");
   }
 
@@ -110,6 +125,7 @@ export default function Command() {
     const content = searchText.trim();
     if (!content || !currentModel) return;
     setStream("");
+    setIsStreaming(true);
     const { conv, list } = ensureConversation();
     const now = Date.now();
     const withUser: Conversation = {
@@ -179,6 +195,8 @@ export default function Command() {
       }
     } catch (e) {
       showToast({ style: Toast.Style.Failure, title: "Chat failed", message: String(e) });
+    } finally {
+      setIsStreaming(false);
     }
   }
 
@@ -221,7 +239,7 @@ export default function Command() {
 
   return (
     <List
-      isLoading={isLoading}
+      isLoading={isLoading || isStreaming}
       isShowingDetail
       searchBarPlaceholder="Ask a question privately... (Press Enter to send)"
       selectedItemId={currentId}
@@ -268,7 +286,10 @@ export default function Command() {
           id={c.id}
           key={c.id}
           title={c.title}
-          accessories={[{ date: new Date(c.updatedAt) }]}
+          accessories={[
+            ...(c.id === currentId && isStreaming ? [{ text: "Typing…" as const }] : []),
+            { date: new Date(c.updatedAt) },
+          ]}
           detail={<List.Item.Detail markdown={toMarkdown(c.id === currentId ? { ...c, messages: c.messages } : c)} />}
           actions={
             <ActionPanel>
