@@ -65,6 +65,15 @@ export default function Command() {
     [models, currentConversation?.modelId, currentModelId],
   );
 
+  async function onModelChange(modelId: string) {
+    setCurrentModelId(modelId);
+    await LocalStorage.setItem("venice_default_model", modelId);
+    if (currentConversation) {
+      const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
+      await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
+    }
+  }
+
   function toMarkdown(conv?: Conversation): string {
     if (!conv) return "";
     const parts = conv.messages.map((m) => {
@@ -219,6 +228,13 @@ export default function Command() {
       filtering={false}
       searchText={searchText}
       onSearchTextChange={setSearchText}
+      searchBarAccessory={
+        <List.Dropdown tooltip="Select Model" value={currentModel?.id ?? currentModelId} onChange={onModelChange}>
+          {models?.map((m) => (
+            <List.Dropdown.Item key={m.id} value={m.id} title={m.name} />
+          ))}
+        </List.Dropdown>
+      }
       onSelectionChange={async (id) => {
         const next = id ?? undefined;
         // Suppress transient selection changes when we just created a chat
