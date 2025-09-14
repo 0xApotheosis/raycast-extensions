@@ -5,7 +5,7 @@
   "description": "Chat with Venice AI.",
   "icon": "extension-icon.png",
   "author": "Apotheosis",
-  "owner": "anteambulo",
+  
   "license": "MIT",
   "commands": [
     {
@@ -44,20 +44,6 @@
       "title": "Venice API Key",
       "required": false,
       "description": "Your personal Venice API key. Stored securely."
-    },
-    {
-      "name": "useDefaultToken",
-      "type": "checkbox",
-      "title": "Use Default Token When No Key",
-      "default": true,
-      "description": "If enabled, obtain a limited-use token from the proxy when no API key is set."
-    },
-    {
-      "name": "defaultTokenProxy",
-      "type": "text",
-      "title": "Default Token Proxy URL",
-      "placeholder": "https://your-proxy.example.com/token",
-      "required": false
     }
   ],
   "dependencies": {

@@ -1,41 +1,58 @@
 import { getPreferenceValues } from "@raycast/api";
-import type { VeniceModel, StreamChunk } from "../types";
+import type { VeniceModel, StreamChunk, VeniceCapability } from "../types";
 
 type Preferences = {
   veniceApiKey?: string;
-  useDefaultToken?: boolean;
-  defaultTokenProxy?: string; // Endpoint that returns a short-lived token
 };
 
 export class VeniceClient {
   private apiKey: string | undefined;
-  private baseUrl = "https://api.venice.ai"; // placeholder; adjust if different
+  private baseUrl: string;
+  private proxyMode: boolean;
 
   constructor() {
     const prefs = getPreferenceValues<Preferences>();
     this.apiKey = prefs.veniceApiKey;
+    this.baseUrl = "https://venice.anteambulo.dev/api/v1";
+    this.proxyMode = true;
   }
 
-  private async getAuthHeader(): Promise<string> {
-    const prefs = getPreferenceValues<Preferences>();
-    if (this.apiKey && this.apiKey.length > 0) return `Bearer ${this.apiKey}`;
-    if (prefs.useDefaultToken && prefs.defaultTokenProxy) {
-      const resp = await fetch(prefs.defaultTokenProxy, { method: "GET" });
-      if (!resp.ok) throw new Error(`Proxy token failed: ${resp.status}`);
-      const { token } = (await resp.json()) as { token: string };
-      return `Bearer ${token}`;
-    }
-    throw new Error("No Venice API key configured");
+  private async getAuthHeader(): Promise<string | undefined> {
+    const key = this.apiKey;
+    return key && key.length > 0 ? `Bearer ${key}` : undefined;
   }
 
-  async listModels(): Promise<VeniceModel[]> {
+  async listModels(
+    type: "all" | "text" | "image" | "tts" | "embedding" | "upscale" | "inpaint" = "all",
+  ): Promise<VeniceModel[]> {
     const auth = await this.getAuthHeader();
-    const resp = await fetch(`${this.baseUrl}/models`, {
-      headers: { Authorization: auth },
-    });
+    const url = new URL(`${this.baseUrl}/models`);
+    if (type && type !== "all") url.searchParams.set("type", type);
+    const headers: Record<string, string> = {};
+    if (auth) headers["Authorization"] = auth;
+    if (this.proxyMode) headers["X-App"] = "venice-raycast";
+    const resp = await fetch(url.toString(), { headers });
     if (!resp.ok) throw new Error(`List models failed: ${resp.status}`);
-    const data = (await resp.json()) as VeniceModel[];
-    return data;
+    const payload = (await resp.json()) as {
+      data: Array<{
+        id: string;
+        type: string;
+        model_spec?: { name?: string; availableContextTokens?: number; traits?: string[] };
+      }>;
+    };
+    const mapTypeToCaps = (t: string): VeniceCapability[] => {
+      if (t === "text") return ["chat"];
+      if (t === "image" || t === "upscale" || t === "inpaint") return ["image"];
+      return ["chat"];
+    };
+    const models: VeniceModel[] = payload.data.map((m) => ({
+      id: m.id,
+      name: m.model_spec?.name || m.id,
+      description: (m.model_spec?.traits || []).join(", "),
+      capabilities: mapTypeToCaps(m.type),
+      contextWindow: m.model_spec?.availableContextTokens,
+    }));
+    return models;
   }
 
   async streamChat(args: {
@@ -46,13 +63,15 @@ export class VeniceClient {
     onChunk: (chunk: StreamChunk) => void;
   }): Promise<void> {
     const auth = await this.getAuthHeader();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    };
+    if (auth) headers["Authorization"] = auth;
+    if (this.proxyMode) headers["X-App"] = "venice-raycast";
     const resp = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        Authorization: auth,
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      },
+      headers,
       body: JSON.stringify({
         model: args.model,
         messages: args.messages,
@@ -84,25 +103,28 @@ export class VeniceClient {
     prompt: string;
     n: number;
     size?: string;
-  }): Promise<{ images: string[] }>{
+  }): Promise<{ images: string[] }> {
     const auth = await this.getAuthHeader();
-    const resp = await fetch(`${this.baseUrl}/images/generations`, {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (auth) headers["Authorization"] = auth;
+    if (this.proxyMode) headers["X-App"] = "venice-raycast";
+    const resp = await fetch(`${this.baseUrl}/image/generations`, {
       method: "POST",
-      headers: {
-        Authorization: auth,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({ model: args.model, prompt: args.prompt, n: args.n, size: args.size }),
     });
     if (!resp.ok) throw new Error(`Image generation failed: ${resp.status}`);
     return (await resp.json()) as { images: string[] };
   }
 
-  async upscaleImage(args: { model: string; imageUrl: string }): Promise<{ image: string }>{
+  async upscaleImage(args: { model: string; imageUrl: string }): Promise<{ image: string }> {
     const auth = await this.getAuthHeader();
-    const resp = await fetch(`${this.baseUrl}/images/upscale`, {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (auth) headers["Authorization"] = auth;
+    if (this.proxyMode) headers["X-App"] = "venice-raycast";
+    const resp = await fetch(`${this.baseUrl}/image/upscale`, {
       method: "POST",
-      headers: { Authorization: auth, "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(args),
     });
     if (!resp.ok) throw new Error(`Upscale failed: ${resp.status}`);
