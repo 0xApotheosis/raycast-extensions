@@ -1,32 +1,146 @@
-import { ActionPanel, Action, Icon, List } from "@raycast/api";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Action,
+  ActionPanel,
+  Alert,
+  Form,
+  Icon,
+  LaunchType,
+  List,
+  LocalStorage,
+  confirmAlert,
+  launchCommand,
+} from "@raycast/api";
+import type { ChatMessage } from "./types";
 
-const ITEMS = Array.from(Array(3).keys()).map((key) => {
-  return {
-    id: key,
-    icon: Icon.Bird,
-    title: "Title " + key,
-    subtitle: "Subtitle",
-    accessory: "Accessory",
-  };
-});
+type Conversation = {
+  id: string;
+  title: string;
+  modelId: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+const STORAGE_KEY = "venice_conversations_v1";
+const LAST_ID_KEY = "venice_last_conversation_id";
 
 export default function Command() {
+  const [searchText, setSearchText] = useState("");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const raw = await LocalStorage.getItem<string>(STORAGE_KEY);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Conversation[];
+          setConversations(parsed.sort((a, b) => b.updatedAt - a.updatedAt));
+        } catch {}
+      }
+    })();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => {
+      if (c.title.toLowerCase().includes(q)) return true;
+      const text = c.messages.map((m) => m.content).join("\n").toLowerCase();
+      return text.includes(q);
+    });
+  }, [conversations, searchText]);
+
+  function toMarkdown(conv: Conversation): string {
+    const parts = conv.messages.map((m) => {
+      const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
+      return `**${name}:**\n${m.content}`;
+    });
+    return parts.join("\n\n---\n\n");
+  }
+
+  async function remove(id: string) {
+    const ok = await confirmAlert({
+      title: "Delete Conversation?",
+      message: "This will remove the conversation permanently from your device.",
+      primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
+      icon: Icon.Trash,
+    });
+    if (!ok) return;
+    const next = conversations.filter((c) => c.id !== id);
+    setConversations(next);
+    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  }
+
   return (
-    <List>
-      {ITEMS.map((item) => (
+    <List
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      searchBarPlaceholder="Search conversations by title or content"
+      isShowingDetail
+    >
+      {filtered.map((c) => (
         <List.Item
-          key={item.id}
-          icon={item.icon}
-          title={item.title}
-          subtitle={item.subtitle}
-          accessories={[{ icon: Icon.Text, text: item.accessory }]}
+          key={c.id}
+          id={c.id}
+          title={c.title}
+          accessories={[{ date: new Date(c.updatedAt) }]}
+          detail={<List.Item.Detail markdown={toMarkdown(c)} />}
           actions={
             <ActionPanel>
-              <Action.CopyToClipboard content={item.title} />
+              <Action
+                title="Open in Chat"
+                icon={Icon.Sidebar}
+                onAction={async () => {
+                  await LocalStorage.setItem(LAST_ID_KEY, c.id);
+                  await launchCommand({ name: "chat", type: LaunchType.UserInitiated });
+                }}
+              />
+              <Action.CopyToClipboard title="Copy Markdown" content={toMarkdown(c)} />
+              <Action
+                title="Rename"
+                icon={Icon.Pencil}
+                onAction={async () => {
+                  const onRename = async (title: string) => {
+                    const next = conversations.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
+                    setConversations(next);
+                    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                  };
+                  await launchCommand({ name: "model-settings", type: LaunchType.UserInitiated });
+                }}
+              />
+              <Action
+                title="Delete"
+                icon={Icon.Trash}
+                style={Action.Style.Destructive}
+                onAction={() => remove(c.id)}
+              />
             </ActionPanel>
           }
         />
       ))}
     </List>
+  );
+}
+
+import { useNavigation } from "@raycast/api";
+function RenameForm(props: { initial: string; onSubmit: (title: string) => Promise<void> }) {
+  const { push, pop } = useNavigation();
+  return (
+    <Form
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Save"
+            onSubmit={async (values: { title: string }) => {
+              await props.onSubmit(values.title.trim() || props.initial);
+              pop();
+            }}
+          />
+        </ActionPanel>
+      }
+    >
+      <Form.TextField id="title" title="Title" defaultValue={props.initial} />
+    </Form>
   );
 }
