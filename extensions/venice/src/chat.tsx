@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage } from "@raycast/api";
+import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
 import { useDefaultModel } from "./hooks/useDefaultModel";
 import { VeniceClient } from "./api/client";
 import type { VeniceModel, ChatMessage } from "./types";
@@ -23,6 +23,7 @@ export default function Command() {
   const [currentId, setCurrentId] = useState<string | undefined>(undefined);
   const [stream, setStream] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const pendingSelectIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -75,8 +76,9 @@ export default function Command() {
   }
 
   async function save(updated: Conversation[]) {
-    setConversations(updated);
-    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    const sorted = [...updated].sort((a, b) => b.updatedAt - a.updatedAt);
+    setConversations(sorted);
+    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
   }
 
   function ensureConversation(): { conv: Conversation; list: Conversation[] } {
@@ -100,13 +102,14 @@ export default function Command() {
     if (!content || !currentModel) return;
     setStream("");
     const { conv, list } = ensureConversation();
+    const now = Date.now();
     const withUser: Conversation = {
       ...conv,
       messages: [
         ...conv.messages,
-        { id: `${Date.now()}-u`, conversationId: conv.id, role: "user", content, createdAt: Date.now() },
+        { id: `${now}-u`, conversationId: conv.id, role: "user", content, createdAt: now },
       ],
-      updatedAt: Date.now(),
+      updatedAt: now,
       modelId: currentModel.id,
     };
     const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
@@ -129,28 +132,82 @@ export default function Command() {
         },
         signal: abortRef.current.signal,
       });
+      const doneAt = Date.now();
       const withAssistant: Conversation = {
         ...withUser,
         messages: [
           ...withUser.messages,
           {
-            id: `${Date.now()}-a`,
+            id: `${doneAt}-a`,
             conversationId: withUser.id,
             role: "assistant",
             content: assistantText,
-            createdAt: Date.now(),
+            createdAt: doneAt,
           },
         ],
-        updatedAt: Date.now(),
+        updatedAt: doneAt,
       };
       setStream("");
-      const list2 = (await LocalStorage.getItem<string>(STORAGE_KEY))
-        ? (JSON.parse((await LocalStorage.getItem<string>(STORAGE_KEY)) as string) as Conversation[])
-        : conversations;
-      await save(list2.map((c) => (c.id === conv.id ? withAssistant : c)));
+      await save(conversations.map((c) => (c.id === conv.id ? withAssistant : c)));
+
+      // Auto-name after first assistant reply
+      if (withAssistant.messages.length >= 2 && withAssistant.title === "New Chat" && currentModel) {
+        try {
+          const client2 = new VeniceClient();
+          const summary = await client2.completeChat({
+            model: currentModel.id,
+            messages: [
+              { role: "system", content: "Summarize the conversation title in 5 words or fewer." },
+              { role: "user", content: withAssistant.messages.map((m) => `${m.role}: ${m.content}`).join("\n\n").slice(0, 1500) },
+            ],
+            settings: { max_tokens: 20, temperature: 0.3 },
+          });
+          const titled: Conversation = { ...withAssistant, title: summary.trim().replaceAll("\n", " ") || "New Chat" };
+          await save(conversations.map((c) => (c.id === conv.id ? titled : c)));
+        } catch {
+          // ignore naming errors
+        }
+      }
     } catch (e) {
       showToast({ style: Toast.Style.Failure, title: "Chat failed", message: String(e) });
     }
+  }
+
+  async function onNewChat() {
+    const id = `${Date.now()}`;
+    const conv: Conversation = {
+      id,
+      title: "New Chat",
+      modelId: currentModel?.id ?? "",
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const next = [conv, ...conversations];
+    await save(next);
+    pendingSelectIdRef.current = id;
+    setCurrentId(id);
+    await LocalStorage.setItem(LAST_ID_KEY, id);
+    setStream("");
+  }
+
+  async function onDelete(id?: string) {
+    const targetId = id ?? currentId;
+    if (!targetId) return;
+    const ok = await confirmAlert({
+      title: "Delete Conversation?",
+      message: "This will remove the conversation permanently from your device.",
+      icon: Icon.Trash,
+      primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
+    });
+    if (!ok) return;
+    const next = conversations.filter((c) => c.id !== targetId);
+    await save(next);
+    if (currentId === targetId) {
+      setCurrentId(next[0]?.id);
+      setStream("");
+    }
+    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
 
   return (
@@ -158,17 +215,29 @@ export default function Command() {
       isLoading={isLoading}
       isShowingDetail
       searchBarPlaceholder="Ask a question privately... (Press Enter to send)"
+      selectedItemId={currentId}
+      filtering={false}
       searchText={searchText}
       onSearchTextChange={setSearchText}
       onSelectionChange={async (id) => {
         const next = id ?? undefined;
-        setCurrentId(next);
-        if (next) await LocalStorage.setItem(LAST_ID_KEY, next);
+        // Suppress transient selection changes when we just created a chat
+        if (pendingSelectIdRef.current) {
+          if (next !== pendingSelectIdRef.current) {
+            return; // ignore flicker event
+          }
+          pendingSelectIdRef.current = null;
+        }
+        if (next !== currentId) {
+          setCurrentId(next);
+          if (next) await LocalStorage.setItem(LAST_ID_KEY, next);
+        }
       }}
       actions={
         <ActionPanel>
           <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
-          <Action title="New Chat" icon={Icon.Plus} onAction={() => setCurrentId(undefined)} shortcut={{ modifiers: ["cmd"], key: "n" }} />
+          <Action title="New Chat" icon={Icon.Plus} onAction={onNewChat} shortcut={{ modifiers: ["cmd"], key: "n" }} />
+          <Action title="Delete Chat" icon={Icon.Trash} onAction={() => onDelete()} shortcut={{ modifiers: ["cmd"], key: "backspace" }} />
           <Action
             title="Cancel Streaming"
             icon={Icon.Stop}
@@ -188,7 +257,8 @@ export default function Command() {
           actions={
             <ActionPanel>
               <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
-              <Action title="New Chat" icon={Icon.Plus} onAction={() => setCurrentId(undefined)} />
+              <Action title="New Chat" icon={Icon.Plus} onAction={onNewChat} />
+              <Action title="Delete Chat" icon={Icon.Trash} onAction={() => onDelete(c.id)} />
               <Action
                 title="Cancel Streaming"
                 icon={Icon.Stop}

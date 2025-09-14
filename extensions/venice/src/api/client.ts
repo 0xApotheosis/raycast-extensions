@@ -148,4 +148,29 @@ export class VeniceClient {
     if (!resp.ok) throw new Error(`Upscale failed: ${resp.status}`);
     return (await resp.json()) as { image: string };
   }
+
+  async completeChat(args: {
+    model: string;
+    messages: { role: string; content: string }[];
+    settings?: { temperature?: number; top_p?: number; top_k?: number; max_tokens?: number };
+  }): Promise<string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    };
+    if (this.proxyMode) headers["X-App"] = "venice-raycast";
+    const resp = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: args.model, messages: args.messages, stream: false, ...args.settings }),
+    });
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => "");
+      throw new Error(`Chat completion failed: ${resp.status} ${msg}`);
+    }
+    const json = (await resp.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return json.choices?.[0]?.message?.content ?? "";
+  }
 }
