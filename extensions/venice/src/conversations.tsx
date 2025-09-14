@@ -8,6 +8,7 @@ import {
   LaunchType,
   List,
   LocalStorage,
+  useNavigation,
   confirmAlert,
   launchCommand,
 } from "@raycast/api";
@@ -26,6 +27,7 @@ const STORAGE_KEY = "venice_conversations_v1";
 const LAST_ID_KEY = "venice_last_conversation_id";
 
 export default function Command() {
+  const { push } = useNavigation();
   const [searchText, setSearchText] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
@@ -106,7 +108,7 @@ export default function Command() {
                     setConversations(next);
                     await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(next));
                   };
-                  await launchCommand({ name: "model-settings", type: LaunchType.UserInitiated });
+                  push(<RenameForm initial={c.title} onSubmit={onRename} />);
                 }}
               />
               <Action
@@ -123,9 +125,8 @@ export default function Command() {
   );
 }
 
-import { useNavigation } from "@raycast/api";
 function RenameForm(props: { initial: string; onSubmit: (title: string) => Promise<void> }) {
-  const { push, pop } = useNavigation();
+  const { pop } = useNavigation();
   return (
     <Form
       actions={

@@ -30,16 +30,16 @@ Local-first AI chat and image generation for Raycast using the Venice API.
 
 - [ ] Create Raycast best-practices reference and keep updated
 - [ ] Design extension architecture and data model (messages, conversations, images)
-- [ ] Implement Venice API client with streaming and types
+- [x] Implement Venice API client with streaming and types
 - [ ] Add secure API key preference with Keychain and default fallback via proxy-issued token
 - [ ] Implement models fetch, cache, and periodic refresh
 - [x] Filter models by capability (chat vs image) and surface accordingly
 - [x] Add Models list command with details and select-as-default
-- [ ] Integrate model picker inside Chat command
+- [x] Integrate model picker inside Chat command
 - [x] Build Chat UI with streaming responses and message composer
 - [x] Persist conversations locally and support continuation
 - [x] Auto-name conversations using cheap Venice summarization
-- [ ] Create Conversations list with search and actions
+- [x] Create Conversations list with search and actions
 - [ ] Create Advanced Model Settings form (temperature, top_p, top_k, max_tokens)
 - [ ] Add Powered by Venice badge and about info
 - [ ] Add subtle animations/loading indicators and polished UX
