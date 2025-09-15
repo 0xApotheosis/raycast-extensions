@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
-import { useDefaultModel } from "./hooks/useDefaultModel";
+import { useEffect, useMemo, useRef, useState } from "react";
+
 import { VeniceClient } from "./api/client";
+import { useDefaultModel } from "./hooks/useDefaultModel";
+
 import type { VeniceModel, ChatMessage } from "./types";
+
 type Conversation = {
   id: string;
   title: string;
@@ -89,9 +92,9 @@ export default function Command() {
     return () => clearInterval(id);
   }, [isStreaming]);
 
-  function toMarkdown(conv?: Conversation): string {
-    if (!conv) return "";
-    const parts = conv.messages.map((m) => {
+  const currentMarkdown = useMemo(() => {
+    if (!currentConversation) return "";
+    const parts = currentConversation.messages.map((m) => {
       const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
       return `**${name}:**\n${m.content}`;
     });
@@ -99,6 +102,14 @@ export default function Command() {
       const caret = isStreaming && caretOn ? " ▍" : "";
       parts.push(`**Venice AI (streaming):**\n${stream}${caret}`);
     }
+    return parts.join("\n\n---\n\n");
+  }, [currentConversation, stream, isStreaming, caretOn]);
+
+  function conversationToMarkdown(conv: Conversation): string {
+    const parts = conv.messages.map((m) => {
+      const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
+      return `**${name}:**\n${m.content}`;
+    });
     return parts.join("\n\n---\n\n");
   }
 
@@ -304,7 +315,7 @@ export default function Command() {
             ...(c.id === currentId && isStreaming ? [{ text: "Typing…" as const }] : []),
             { date: new Date(c.updatedAt) },
           ]}
-          detail={<List.Item.Detail markdown={toMarkdown(c.id === currentId ? { ...c, messages: c.messages } : c)} />}
+          detail={<List.Item.Detail markdown={c.id === currentId ? currentMarkdown : undefined} />}
           actions={
             <ActionPanel>
               <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
@@ -317,7 +328,7 @@ export default function Command() {
                 shortcut={{ modifiers: ["cmd"], key: "." }}
               />
               <Action title="Open" onAction={() => setCurrentId(c.id)} />
-              <Action.CopyToClipboard title="Copy Conversation" content={toMarkdown(c)} />
+              <Action.CopyToClipboard title="Copy Conversation" content={conversationToMarkdown(c)} />
             </ActionPanel>
           }
         />

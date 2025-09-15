@@ -1,7 +1,9 @@
 import { useMemo } from "react";
-import type { VeniceCapability, VeniceModel } from "../types";
+
 import { useModels } from "./useModels";
 import { filterModelsByCapability } from "../utils/models";
+
+import type { VeniceCapability, VeniceModel } from "../types";
 
 export function useDefaultModel(capability: "all" | VeniceCapability = "all") {
   const { data: models, isLoading, mutate, error } = useModels();

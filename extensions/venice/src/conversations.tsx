@@ -1,4 +1,3 @@
-import { useEffect, useMemo, useState } from "react";
 import {
   Action,
   ActionPanel,
@@ -12,6 +11,8 @@ import {
   confirmAlert,
   launchCommand,
 } from "@raycast/api";
+import { useEffect, useMemo, useState } from "react";
+
 import type { ChatMessage } from "./types";
 
 type Conversation = {

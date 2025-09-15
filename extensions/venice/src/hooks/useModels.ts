@@ -1,6 +1,8 @@
 import { Cache } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
+
 import { VeniceClient } from "../api/client";
+
 import type { VeniceModel } from "../types";
 
 const cache = new Cache();

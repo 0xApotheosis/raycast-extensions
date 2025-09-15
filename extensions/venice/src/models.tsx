@@ -1,8 +1,10 @@
-import { ActionPanel, Action, Icon, List, Color, showToast, Toast } from "@raycast/api";
+import { ActionPanel, Action, Icon, List, Color, showToast, Toast, LocalStorage } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
+
 import { useModels } from "./hooks/useModels";
-import type { VeniceModel } from "./types";
 import { filterModelsByCapability } from "./utils/models";
+
+import type { VeniceModel } from "./types";
 
 type CapabilityFilter = "all" | "chat" | "image";
 
@@ -70,7 +72,7 @@ function ModelActions({ model, onRefresh }: { model: VeniceModel; onRefresh: () 
         icon={Icon.Checkmark}
         onAction={async () => {
           try {
-            localStorage.setItem("venice_default_model", model.id);
+            await LocalStorage.setItem("venice_default_model", model.id);
             await showToast({ style: Toast.Style.Success, title: `${model.name || model.id} set as default` });
             onRefresh();
           } catch (e) {

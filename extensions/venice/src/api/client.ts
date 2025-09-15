@@ -1,4 +1,5 @@
 import { getPreferenceValues } from "@raycast/api";
+
 import type { VeniceModel, StreamChunk, VeniceCapability } from "../types";
 
 type Preferences = {
