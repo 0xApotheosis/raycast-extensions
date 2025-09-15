@@ -38,7 +38,9 @@ export default function Command() {
         try {
           const parsed = JSON.parse(raw) as Conversation[];
           setConversations(parsed.sort((a, b) => b.updatedAt - a.updatedAt));
-        } catch {}
+        } catch {
+          // ignore parse errors
+        }
       }
     })();
   }, []);
@@ -48,7 +50,10 @@ export default function Command() {
     if (!q) return conversations;
     return conversations.filter((c) => {
       if (c.title.toLowerCase().includes(q)) return true;
-      const text = c.messages.map((m) => m.content).join("\n").toLowerCase();
+      const text = c.messages
+        .map((m) => m.content)
+        .join("\n")
+        .toLowerCase();
       return text.includes(q);
     });
   }, [conversations, searchText]);
@@ -111,12 +116,7 @@ export default function Command() {
                   push(<RenameForm initial={c.title} onSubmit={onRename} />);
                 }}
               />
-              <Action
-                title="Delete"
-                icon={Icon.Trash}
-                style={Action.Style.Destructive}
-                onAction={() => remove(c.id)}
-              />
+              <Action title="Delete" icon={Icon.Trash} style={Action.Style.Destructive} onAction={() => remove(c.id)} />
             </ActionPanel>
           }
         />

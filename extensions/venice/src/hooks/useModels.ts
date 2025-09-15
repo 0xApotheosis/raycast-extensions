@@ -22,13 +22,13 @@ function writeCache(models: VeniceModel[]) {
 }
 
 export function useModels() {
-  const client = new VeniceClient();
   return useCachedPromise(
     async () => {
       const cached = readCache();
       if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
         return cached.models;
       }
+      const client = new VeniceClient();
       const models = await client.listModels();
       writeCache(models);
       return models;

@@ -26,6 +26,7 @@ export default function Command() {
   const [caretOn, setCaretOn] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingSelectIdRef = useRef<string | null>(null);
+  const isInitializingRef = useRef<boolean>(true);
 
   useEffect(() => {
     (async () => {
@@ -33,7 +34,7 @@ export default function Command() {
       if (saved) setCurrentModelId(saved);
       else if (model) setCurrentModelId(model.id);
     })();
-  }, [model?.id]);
+  }, [model]);
 
   // Load conversations and last open conversation on mount
   useEffect(() => {
@@ -49,6 +50,8 @@ export default function Command() {
         }
       } catch {
         // ignore parse errors
+      } finally {
+        isInitializingRef.current = false;
       }
     })();
   }, []);
@@ -130,10 +133,7 @@ export default function Command() {
     const now = Date.now();
     const withUser: Conversation = {
       ...conv,
-      messages: [
-        ...conv.messages,
-        { id: `${now}-u`, conversationId: conv.id, role: "user", content, createdAt: now },
-      ],
+      messages: [...conv.messages, { id: `${now}-u`, conversationId: conv.id, role: "user", content, createdAt: now }],
       updatedAt: now,
       modelId: currentModel.id,
     };
@@ -183,7 +183,13 @@ export default function Command() {
             model: currentModel.id,
             messages: [
               { role: "system", content: "Summarize the conversation title in 5 words or fewer." },
-              { role: "user", content: withAssistant.messages.map((m) => `${m.role}: ${m.content}`).join("\n\n").slice(0, 1500) },
+              {
+                role: "user",
+                content: withAssistant.messages
+                  .map((m) => `${m.role}: ${m.content}`)
+                  .join("\n\n")
+                  .slice(0, 1500),
+              },
             ],
             settings: { max_tokens: 20, temperature: 0.3 },
           });
@@ -254,6 +260,9 @@ export default function Command() {
         </List.Dropdown>
       }
       onSelectionChange={async (id) => {
+        if (isInitializingRef.current) {
+          return; // ignore selection changes during initial load to prevent flicker
+        }
         const next = id ?? undefined;
         // Suppress transient selection changes when we just created a chat
         if (pendingSelectIdRef.current) {
@@ -271,7 +280,12 @@ export default function Command() {
         <ActionPanel>
           <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
           <Action title="New Chat" icon={Icon.Plus} onAction={onNewChat} shortcut={{ modifiers: ["cmd"], key: "n" }} />
-          <Action title="Delete Chat" icon={Icon.Trash} onAction={() => onDelete()} shortcut={{ modifiers: ["cmd"], key: "backspace" }} />
+          <Action
+            title="Delete Chat"
+            icon={Icon.Trash}
+            onAction={() => onDelete()}
+            shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+          />
           <Action
             title="Cancel Streaming"
             icon={Icon.Stop}
