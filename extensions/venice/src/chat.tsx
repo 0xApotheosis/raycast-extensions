@@ -39,17 +39,16 @@ export default function Command() {
     })();
   }, [model]);
 
-  // Load conversations and last open conversation on mount
+  // Load conversations on mount and select the most recent one
   useEffect(() => {
     (async () => {
       try {
         const raw = await LocalStorage.getItem<string>(STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as Conversation[];
-          setConversations(parsed);
-          const last = await LocalStorage.getItem<string>(LAST_ID_KEY);
-          if (last && parsed.find((c) => c.id === last)) setCurrentId(last);
-          else if (parsed.length > 0) setCurrentId(parsed[0].id);
+          const sorted = [...parsed].sort((a, b) => b.updatedAt - a.updatedAt);
+          setConversations(sorted);
+          if (sorted.length > 0) setCurrentId(sorted[0].id);
         }
       } catch {
         // ignore parse errors

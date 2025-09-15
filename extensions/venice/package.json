@@ -27,13 +27,6 @@
       "subtitle": "View Venice AI models",
       "description": "View a list of all Venice AI models",
       "mode": "view"
-    },
-    {
-      "name": "model-settings",
-      "title": "Model Settings",
-      "subtitle": "Configure model settings",
-      "description": "Allows you to configure model settings.",
-      "mode": "no-view"
     }
   ],
   "preferences": [
