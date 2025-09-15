@@ -8,6 +8,7 @@
     "strict": true,
     "isolatedModules": true,
     "esModuleInterop": true,
+    "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",

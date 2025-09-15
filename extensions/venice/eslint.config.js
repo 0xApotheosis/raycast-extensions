@@ -4,15 +4,24 @@ const importPlugin = require("eslint-plugin-import");
 const promisePlugin = require("eslint-plugin-promise");
 const reactHooks = require("eslint-plugin-react-hooks");
 const unusedImports = require("eslint-plugin-unused-imports");
+const react = require("eslint-plugin-react");
 
 module.exports = defineConfig([
   ...raycastConfig,
   {
+    languageOptions: {
+      parserOptions: {
+        // Required so rules like deprecation/deprecation can access type info
+        project: ["./tsconfig.json"],
+        tsconfigRootDir: __dirname,
+      },
+    },
     plugins: {
       "react-hooks": reactHooks,
       import: importPlugin,
       "unused-imports": unusedImports,
       promise: promisePlugin,
+      react,
     },
     rules: {
       // Enforce the Rules of Hooks
@@ -64,6 +73,13 @@ module.exports = defineConfig([
 
       // Allow void operator to signify intentionally ignored promises
       "no-void": ["error", { allowAsStatement: true }],
+
+      // React JSX best practices
+      "react/jsx-key": "error",
+      "react/jsx-no-useless-fragment": ["warn", { allowExpressions: true }],
+
+      // Console usage
+      "no-console": ["warn", { allow: ["warn", "error"] }],
     },
   },
 ]);
