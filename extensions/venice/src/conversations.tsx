@@ -6,12 +6,13 @@ import {
   Icon,
   LaunchType,
   List,
-  LocalStorage,
   useNavigation,
   confirmAlert,
   launchCommand,
 } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
+
+import { loadConversationsFromStorage, writeConversationsStorage, writeLastConversationId } from "./storage/conversations";
 
 import type { ChatMessage } from "./types";
 
@@ -24,9 +25,6 @@ type Conversation = {
   updatedAt: number;
 };
 
-const STORAGE_KEY = "venice_conversations_v1";
-const LAST_ID_KEY = "venice_last_conversation_id";
-
 export default function Command() {
   const { push } = useNavigation();
   const [searchText, setSearchText] = useState("");
@@ -34,11 +32,10 @@ export default function Command() {
 
   useEffect(() => {
     (async () => {
-      const raw = await LocalStorage.getItem<string>(STORAGE_KEY);
-      if (raw) {
+      const stored = await loadConversationsFromStorage<Conversation>();
+      if (stored) {
         try {
-          const parsed = JSON.parse(raw) as Conversation[];
-          setConversations(parsed.sort((a, b) => b.updatedAt - a.updatedAt));
+          setConversations(stored.sort((a, b) => b.updatedAt - a.updatedAt));
         } catch {
           // ignore parse errors
         }
@@ -77,7 +74,7 @@ export default function Command() {
     if (!ok) return;
     const next = conversations.filter((c) => c.id !== id);
     setConversations(next);
-    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    await writeConversationsStorage(next);
   }
 
   return (
@@ -100,7 +97,7 @@ export default function Command() {
                 title="Open in Chat"
                 icon={Icon.Sidebar}
                 onAction={async () => {
-                  await LocalStorage.setItem(LAST_ID_KEY, c.id);
+                  await writeLastConversationId(c.id);
                   await launchCommand({ name: "chat", type: LaunchType.UserInitiated });
                 }}
               />
@@ -112,7 +109,7 @@ export default function Command() {
                   const onRename = async (title: string) => {
                     const next = conversations.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
                     setConversations(next);
-                    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                    await writeConversationsStorage(next);
                   };
                   push(<RenameForm initial={c.title} onSubmit={onRename} />);
                 }}

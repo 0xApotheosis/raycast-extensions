@@ -3,6 +3,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { VeniceClient } from "./api/client";
 import { useDefaultModel } from "./hooks/useDefaultModel";
+import {
+  readConversationsCache,
+  loadConversationsFromStorage,
+  writeConversationsStorage,
+  readLastConversationIdCache,
+  loadLastConversationIdFromStorage,
+  writeLastConversationId,
+} from "./storage/conversations";
 
 import type { VeniceModel, ChatMessage } from "./types";
 
@@ -15,15 +23,20 @@ type Conversation = {
   updatedAt: number;
 };
 
-const STORAGE_KEY = "venice_conversations_v1";
-const LAST_ID_KEY = "venice_last_conversation_id";
-
 export default function Command() {
-  const { model, models, isLoading, error } = useDefaultModel("chat");
+  const { model, models, error } = useDefaultModel("chat");
   const [currentModelId, setCurrentModelId] = useState<string | undefined>(undefined);
   const [searchText, setSearchText] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [currentId, setCurrentId] = useState<string | undefined>(undefined);
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    const cached = readConversationsCache<Conversation>() ?? [];
+    return [...cached].sort((a, b) => b.updatedAt - a.updatedAt);
+  });
+  const [currentId, setCurrentId] = useState<string | undefined>(() => {
+    const cached = readConversationsCache<Conversation>() ?? [];
+    const sorted = [...cached].sort((a, b) => b.updatedAt - a.updatedAt);
+    const lastId = readLastConversationIdCache();
+    return lastId && sorted.some((c) => c.id === lastId) ? lastId : sorted[0]?.id;
+  });
   const [stream, setStream] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [caretOn, setCaretOn] = useState(false);
@@ -39,16 +52,19 @@ export default function Command() {
     })();
   }, [model]);
 
-  // Load conversations on mount and select the most recent one
+  // Load conversations on mount and reconcile selection from persistent storage
   useEffect(() => {
     (async () => {
       try {
-        const raw = await LocalStorage.getItem<string>(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as Conversation[];
-          const sorted = [...parsed].sort((a, b) => b.updatedAt - a.updatedAt);
+        const stored = await loadConversationsFromStorage<Conversation>();
+        const lastId = await loadLastConversationIdFromStorage();
+        if (stored && stored.length > 0) {
+          const sorted = [...stored].sort((a, b) => b.updatedAt - a.updatedAt);
           setConversations(sorted);
-          if (sorted.length > 0) setCurrentId(sorted[0].id);
+          // Refresh synchronous cache for future warm-starts
+          await writeConversationsStorage(sorted);
+          const exists = lastId && sorted.some((c) => c.id === lastId);
+          setCurrentId(exists ? lastId : sorted[0]?.id);
         }
       } catch {
         // ignore parse errors
@@ -115,7 +131,7 @@ export default function Command() {
   async function save(updated: Conversation[]) {
     const sorted = [...updated].sort((a, b) => b.updatedAt - a.updatedAt);
     setConversations(sorted);
-    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
+    await writeConversationsStorage(sorted);
   }
 
   function ensureConversation(): { conv: Conversation; list: Conversation[] } {
@@ -230,7 +246,7 @@ export default function Command() {
     await save(next);
     pendingSelectIdRef.current = id;
     setCurrentId(id);
-    await LocalStorage.setItem(LAST_ID_KEY, id);
+    await writeLastConversationId(id);
     setStream("");
   }
 
@@ -248,14 +264,14 @@ export default function Command() {
     await save(next);
     if (currentId === targetId) {
       setCurrentId(next[0]?.id);
+      if (next[0]?.id) await writeLastConversationId(next[0].id);
       setStream("");
     }
-    await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
 
   return (
     <List
-      isLoading={isLoading || isStreaming}
+      isLoading={isStreaming}
       isShowingDetail
       searchBarPlaceholder="Ask a question privately... (Press Enter to send)"
       selectedItemId={currentId}
@@ -283,7 +299,7 @@ export default function Command() {
         }
         if (next !== currentId) {
           setCurrentId(next);
-          if (next) await LocalStorage.setItem(LAST_ID_KEY, next);
+          if (next) await writeLastConversationId(next);
         }
       }}
       actions={
