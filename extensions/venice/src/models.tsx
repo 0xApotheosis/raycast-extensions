@@ -10,15 +10,20 @@ import type { VeniceModel } from "./types";
 // Hook to get the default model ID
 function useDefaultModelId() {
   const [defaultModelId, setDefaultModelId] = useState<string | undefined>();
-  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
 
     const loadDefaultModel = async () => {
-      const saved = await LocalStorage.getItem<string>("venice_default_model");
-      if (isMounted) {
-        setDefaultModelId(saved);
+      try {
+        const saved = await LocalStorage.getItem<string>("venice_default_model");
+        if (isMounted) {
+          setDefaultModelId(saved);
+        }
+      } catch {
+        if (isMounted) {
+          setDefaultModelId(undefined);
+        }
       }
     };
 
@@ -27,25 +32,9 @@ function useDefaultModelId() {
     return () => {
       isMounted = false;
     };
-  }, [refreshKey]);
-
-  // Expose a refresh function
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Check for changes every 500ms
-      LocalStorage.getItem<string>("venice_default_model")
-        .then((saved) => {
-          setDefaultModelId(saved);
-        })
-        .catch(() => {
-          // Ignore errors
-        });
-    }, 500);
-
-    return () => clearInterval(interval);
   }, []);
 
-  return { defaultModelId, refresh: () => setRefreshKey((prev) => prev + 1) };
+  return { defaultModelId, setDefaultModelId };
 }
 
 type CapabilityFilter = "all" | "chat" | "image";
@@ -53,6 +42,7 @@ type CapabilityFilter = "all" | "chat" | "image";
 export default function Command() {
   const { data: models, isLoading, mutate, error } = useModels();
   const [filter, setFilter] = useState<CapabilityFilter>("all");
+  const { defaultModelId, setDefaultModelId } = useDefaultModelId();
   const filtered = useMemo(() => (models ? filterModelsByCapability(models, filter) : []), [models, filter]);
 
   useEffect(() => {
@@ -70,7 +60,13 @@ export default function Command() {
       throttle
     >
       {filtered?.map((m) => (
-        <ModelItem key={m.id} model={m} onRefresh={mutate} />
+        <ModelItem
+          key={m.id}
+          model={m}
+          onRefresh={mutate}
+          defaultModelId={defaultModelId}
+          setDefaultModelId={setDefaultModelId}
+        />
       ))}
     </List>
   );
@@ -90,8 +86,17 @@ function CapabilityDropdown(props: { value: CapabilityFilter; onChange: (v: Capa
   );
 }
 
-function ModelItem({ model, onRefresh }: { model: VeniceModel; onRefresh: () => void }) {
-  const { defaultModelId } = useDefaultModelId();
+function ModelItem({
+  model,
+  onRefresh,
+  defaultModelId,
+  setDefaultModelId
+}: {
+  model: VeniceModel;
+  onRefresh: () => void;
+  defaultModelId?: string;
+  setDefaultModelId: (id: string | undefined) => void;
+}) {
   const [hasCustom, setHasCustom] = useState<boolean>(false);
 
   async function refreshCustomState() {
@@ -125,39 +130,38 @@ function ModelItem({ model, onRefresh }: { model: VeniceModel; onRefresh: () => 
     onRefresh();
   };
 
+  const handleSetAsDefault = async () => {
+    try {
+      await LocalStorage.setItem("venice_default_model", model.id);
+      setDefaultModelId(model.id); // Update state immediately - this will be shared across all ModelItems
+      await showToast({ style: Toast.Style.Success, title: `${model.name || model.id} set as default` });
+      onRefresh(); // Refresh the models list
+    } catch (e) {
+      await showToast({ style: Toast.Style.Failure, title: "Failed to set default", message: String(e) });
+    }
+  };
+
   return (
     <List.Item
       icon={Icon.Cog}
       title={model.name || model.id}
       subtitle={model.description}
       accessories={accessories}
-      actions={<ModelActions model={model} onRefresh={handleRefresh} />}
+      actions={
+        <ActionPanel>
+          <Action
+            title="Set as Default Model"
+            icon={Icon.Checkmark}
+            onAction={handleSetAsDefault}
+          />
+          <Action.Push
+            title="Advanced Settings"
+            icon={Icon.Gear}
+            target={<AdvancedSettingsForm model={model} onRefresh={handleRefresh} />}
+          />
+          <Action.CopyToClipboard title="Copy Model ID" content={model.id} />
+        </ActionPanel>
+      }
     />
-  );
-}
-
-function ModelActions({ model, onRefresh }: { model: VeniceModel; onRefresh: () => void }) {
-  return (
-    <ActionPanel>
-      <Action
-        title="Set as Default Model"
-        icon={Icon.Checkmark}
-        onAction={async () => {
-          try {
-            await LocalStorage.setItem("venice_default_model", model.id);
-            await showToast({ style: Toast.Style.Success, title: `${model.name || model.id} set as default` });
-            onRefresh(); // Refresh the models list and trigger default model refresh
-          } catch (e) {
-            await showToast({ style: Toast.Style.Failure, title: "Failed to set default", message: String(e) });
-          }
-        }}
-      />
-      <Action.Push
-        title="Advanced Settings"
-        icon={Icon.Gear}
-        target={<AdvancedSettingsForm model={model} onRefresh={onRefresh} />}
-      />
-      <Action.CopyToClipboard title="Copy Model ID" content={model.id} />
-    </ActionPanel>
   );
 }
