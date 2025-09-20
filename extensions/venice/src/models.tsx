@@ -1,10 +1,52 @@
 import { ActionPanel, Action, Icon, List, Color, showToast, Toast, LocalStorage } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
 
+import AdvancedSettingsForm from "./advanced-settings";
 import { useModels } from "./hooks/useModels";
 import { filterModelsByCapability } from "./utils/models";
 
 import type { VeniceModel } from "./types";
+
+// Hook to get the default model ID
+function useDefaultModelId() {
+  const [defaultModelId, setDefaultModelId] = useState<string | undefined>();
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDefaultModel = async () => {
+      const saved = await LocalStorage.getItem<string>("venice_default_model");
+      if (isMounted) {
+        setDefaultModelId(saved);
+      }
+    };
+
+    loadDefaultModel();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [refreshKey]);
+
+  // Expose a refresh function
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Check for changes every 500ms
+      LocalStorage.getItem<string>("venice_default_model")
+        .then((saved) => {
+          setDefaultModelId(saved);
+        })
+        .catch(() => {
+          // Ignore errors
+        });
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return { defaultModelId, refresh: () => setRefreshKey((prev) => prev + 1) };
+}
 
 type CapabilityFilter = "all" | "chat" | "image";
 
@@ -49,10 +91,19 @@ function CapabilityDropdown(props: { value: CapabilityFilter; onChange: (v: Capa
 }
 
 function ModelItem({ model, onRefresh }: { model: VeniceModel; onRefresh: () => void }) {
+  const { defaultModelId } = useDefaultModelId();
+
   const accessories: Array<{ tag?: { value: string; color?: Color.ColorLike }; text?: string }> = [
     { tag: { value: model.capabilities.join(", "), color: Color.Blue } },
   ];
+
+  // Add Default tag if this model is the default
+  if (defaultModelId === model.id) {
+    accessories.unshift({ tag: { value: "Default", color: Color.Green } });
+  }
+
   if (model.contextWindow) accessories.push({ text: `${model.contextWindow} tokens` });
+
   return (
     <List.Item
       icon={Icon.Cog}
@@ -74,11 +125,16 @@ function ModelActions({ model, onRefresh }: { model: VeniceModel; onRefresh: () 
           try {
             await LocalStorage.setItem("venice_default_model", model.id);
             await showToast({ style: Toast.Style.Success, title: `${model.name || model.id} set as default` });
-            onRefresh();
+            onRefresh(); // Refresh the models list and trigger default model refresh
           } catch (e) {
             await showToast({ style: Toast.Style.Failure, title: "Failed to set default", message: String(e) });
           }
         }}
+      />
+      <Action.Push
+        title="Advanced Settings"
+        icon={Icon.Gear}
+        target={<AdvancedSettingsForm model={model} onRefresh={onRefresh} />}
       />
       <Action.CopyToClipboard title="Copy Model ID" content={model.id} />
     </ActionPanel>

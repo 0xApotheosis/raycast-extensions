@@ -11,8 +11,9 @@ import {
   loadLastConversationIdFromStorage,
   writeLastConversationId,
 } from "./storage/conversations";
+import { getModelSettings, hasCustomModelSettings } from "./utils/models";
 
-import type { VeniceModel, ChatMessage } from "./types";
+import type { VeniceModel, ChatMessage, ModelSettings } from "./types";
 
 type Conversation = {
   id: string;
@@ -28,11 +29,11 @@ export default function Command() {
   const [currentModelId, setCurrentModelId] = useState<string | undefined>(undefined);
   const [searchText, setSearchText] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>(() => {
-    const cached = readConversationsCache<Conversation>() ?? [];
+    const cached = readConversationsCache() ?? [];
     return [...cached].sort((a, b) => b.updatedAt - a.updatedAt);
   });
   const [currentId, setCurrentId] = useState<string | undefined>(() => {
-    const cached = readConversationsCache<Conversation>() ?? [];
+    const cached = readConversationsCache() ?? [];
     const sorted = [...cached].sort((a, b) => b.updatedAt - a.updatedAt);
     const lastId = readLastConversationIdCache();
     return lastId && sorted.some((c) => c.id === lastId) ? lastId : sorted[0]?.id;
@@ -40,23 +41,49 @@ export default function Command() {
   const [stream, setStream] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [caretOn, setCaretOn] = useState(false);
+  const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
+  const [customSettingsModels, setCustomSettingsModels] = useState<Set<string>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
   const pendingSelectIdRef = useRef<string | null>(null);
   const isInitializingRef = useRef<boolean>(true);
+  const defaultModelSetRef = useRef<boolean>(false);
 
   useEffect(() => {
-    (async () => {
-      const saved = await LocalStorage.getItem<string>("venice_default_model");
-      if (saved) setCurrentModelId(saved);
-      else if (model) setCurrentModelId(model.id);
-    })();
-  }, [model]);
+    // Load the default model when models become available
+    if (model && !defaultModelSetRef.current) {
+      (async () => {
+        const saved = await LocalStorage.getItem<string>("venice_default_model");
+        if (saved && models?.find((m) => m.id === saved)) {
+          setCurrentModelId(saved);
+        } else if (model) {
+          setCurrentModelId(model.id);
+        }
+        defaultModelSetRef.current = true;
+      })();
+    }
+  }, [model, models]);
+
+  // Additional check: if we have models but currentModelId is not set correctly, fix it
+  useEffect(() => {
+    if (models && models.length > 0 && currentModelId) {
+      const saved = LocalStorage.getItem<string>("venice_default_model");
+      saved
+        .then((savedId) => {
+          if (savedId && savedId !== currentModelId && models.find((m) => m.id === savedId)) {
+            setCurrentModelId(savedId);
+          }
+        })
+        .catch(() => {
+          // Ignore errors
+        });
+    }
+  }, [models, currentModelId]);
 
   // Load conversations on mount and reconcile selection from persistent storage
   useEffect(() => {
     (async () => {
       try {
-        const stored = await loadConversationsFromStorage<Conversation>();
+        const stored = await loadConversationsFromStorage();
         const lastId = await loadLastConversationIdFromStorage();
         if (stored && stored.length > 0) {
           const sorted = [...stored].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -78,15 +105,33 @@ export default function Command() {
     if (error) showToast({ style: Toast.Style.Failure, title: "Models error", message: String(error) });
   }, [error]);
 
+  // Load model settings
+  useEffect(() => {
+    if (!models) return;
+    (async () => {
+      const settings: Record<string, ModelSettings> = {};
+      const customModels = new Set<string>();
+      for (const model of models) {
+        settings[model.id] = await getModelSettings(model.id);
+        if (await hasCustomModelSettings(model.id)) {
+          customModels.add(model.id);
+        }
+      }
+      setModelSettings(settings);
+      setCustomSettingsModels(customModels);
+    })();
+  }, [models]);
+
   const currentConversation: Conversation | undefined = useMemo(
     () => conversations.find((c) => c.id === currentId),
     [conversations, currentId],
   );
 
-  const currentModel: VeniceModel | undefined = useMemo(
-    () => models?.find((m) => m.id === (currentConversation?.modelId ?? currentModelId)) || models?.[0],
-    [models, currentConversation?.modelId, currentModelId],
-  );
+  const currentModel: VeniceModel | undefined = useMemo(() => {
+    // Priority order: current conversation model > saved default > first model
+    const targetModelId = currentConversation?.modelId ?? currentModelId;
+    return models?.find((m) => m.id === targetModelId) || models?.[0] || undefined;
+  }, [models, currentConversation?.modelId, currentModelId]);
 
   async function onModelChange(modelId: string) {
     setCurrentModelId(modelId);
@@ -128,26 +173,52 @@ export default function Command() {
     return parts.join("\n\n---\n\n");
   }
 
-  async function save(updated: Conversation[]) {
+  async function save(updated: Conversation[]): Promise<Conversation[]> {
     const sorted = [...updated].sort((a, b) => b.updatedAt - a.updatedAt);
     setConversations(sorted);
     await writeConversationsStorage(sorted);
+    return sorted;
   }
 
-  function ensureConversation(): { conv: Conversation; list: Conversation[] } {
+  // Determine the preferred model id for new chats
+  async function resolvePreferredModelId(): Promise<string | undefined> {
+    // 1) Use currentModelId if it exists and is valid
+    if (currentModelId && models?.some((m) => m.id === currentModelId)) {
+      return currentModelId;
+    }
+    // 2) Use saved default if present and valid
+    try {
+      const saved = await LocalStorage.getItem<string>("venice_default_model");
+      if (saved && models?.some((m) => m.id === saved)) {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    // 3) Fall back to hook-provided first model, then list first
+    if (model?.id) return model.id;
+    return models?.[0]?.id;
+  }
+
+  async function ensureConversation(): Promise<{ conv: Conversation; list: Conversation[] }> {
     if (currentConversation) return { conv: currentConversation, list: conversations };
+    const preferredModelId = await resolvePreferredModelId();
     const conv: Conversation = {
       id: `${Date.now()}`,
       title: "New Chat",
-      modelId: currentModel?.id ?? "",
+      modelId: preferredModelId ?? "",
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
     const next = [conv, ...conversations];
-    void save(next);
+    const updatedList = await save(next);
     setCurrentId(conv.id);
-    return { conv, list: next };
+    // Ensure UI state reflects the preferred model ASAP
+    if (preferredModelId && preferredModelId !== currentModelId) {
+      setCurrentModelId(preferredModelId);
+    }
+    return { conv, list: updatedList };
   }
 
   async function onSend() {
@@ -155,7 +226,7 @@ export default function Command() {
     if (!content || !currentModel) return;
     setStream("");
     setIsStreaming(true);
-    const { conv, list } = ensureConversation();
+    const { conv, list } = await ensureConversation();
     const now = Date.now();
     const withUser: Conversation = {
       ...conv,
@@ -164,7 +235,7 @@ export default function Command() {
       modelId: currentModel.id,
     };
     const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
-    await save(base.map((c) => (c.id === conv.id ? withUser : c)));
+    const updatedConversations = await save(base.map((c) => (c.id === conv.id ? withUser : c)));
     setSearchText("");
 
     const client = new VeniceClient();
@@ -172,9 +243,16 @@ export default function Command() {
     abortRef.current = new AbortController();
     let assistantText = "";
     try {
+      const settings = modelSettings[currentModel.id] || ({} as ModelSettings);
       await client.streamChat({
         model: currentModel.id,
         messages: withUser.messages.map((m) => ({ role: m.role, content: m.content })),
+        settings: {
+          temperature: settings.temperature,
+          top_p: settings.topP,
+          top_k: settings.topK,
+          max_tokens: settings.maxTokens,
+        },
         onChunk: (c) => {
           if (c.type === "text" && c.data) {
             assistantText += c.data;
@@ -199,12 +277,13 @@ export default function Command() {
         updatedAt: doneAt,
       };
       setStream("");
-      await save(conversations.map((c) => (c.id === conv.id ? withAssistant : c)));
+      const finalConversations = await save(updatedConversations.map((c) => (c.id === conv.id ? withAssistant : c)));
 
       // Auto-name after first assistant reply
       if (withAssistant.messages.length >= 2 && withAssistant.title === "New Chat" && currentModel) {
         try {
           const client2 = new VeniceClient();
+          const summarySettings = modelSettings[currentModel.id] || ({} as ModelSettings);
           const summary = await client2.completeChat({
             model: currentModel.id,
             messages: [
@@ -217,10 +296,14 @@ export default function Command() {
                   .slice(0, 1500),
               },
             ],
-            settings: { max_tokens: 20, temperature: 0.3 },
+            settings: {
+              max_tokens: 20,
+              temperature: 0.3,
+              ...summarySettings,
+            },
           });
-          const titled: Conversation = { ...withAssistant, title: summary.trim().replaceAll("\n", " ") || "New Chat" };
-          await save(conversations.map((c) => (c.id === conv.id ? titled : c)));
+          const titled: Conversation = { ...withAssistant, title: summary.trim().replace(/\n/g, " ") || "New Chat" };
+          await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
         } catch {
           // ignore naming errors
         }
@@ -234,10 +317,11 @@ export default function Command() {
 
   async function onNewChat() {
     const id = `${Date.now()}`;
+    const preferredModelId = await resolvePreferredModelId();
     const conv: Conversation = {
       id,
       title: "New Chat",
-      modelId: currentModel?.id ?? "",
+      modelId: preferredModelId ?? "",
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -248,6 +332,10 @@ export default function Command() {
     setCurrentId(id);
     await writeLastConversationId(id);
     setStream("");
+    // Ensure UI model picker reflects the preferred model immediately
+    if (preferredModelId && preferredModelId !== currentModelId) {
+      setCurrentModelId(preferredModelId);
+    }
   }
 
   async function onDelete(id?: string) {
@@ -281,7 +369,12 @@ export default function Command() {
       searchBarAccessory={
         <List.Dropdown tooltip="Select Model" value={currentModel?.id ?? currentModelId} onChange={onModelChange}>
           {models?.map((m) => (
-            <List.Dropdown.Item key={m.id} value={m.id} title={m.name} />
+            <List.Dropdown.Item
+              key={m.id}
+              value={m.id}
+              title={m.name}
+              icon={customSettingsModels.has(m.id) ? Icon.Gear : undefined}
+            />
           ))}
         </List.Dropdown>
       }

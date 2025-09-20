@@ -12,7 +12,11 @@ import {
 } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
 
-import { loadConversationsFromStorage, writeConversationsStorage, writeLastConversationId } from "./storage/conversations";
+import {
+  loadConversationsFromStorage,
+  writeConversationsStorage,
+  writeLastConversationId,
+} from "./storage/conversations";
 
 import type { ChatMessage } from "./types";
 
@@ -73,8 +77,9 @@ export default function Command() {
     });
     if (!ok) return;
     const next = conversations.filter((c) => c.id !== id);
-    setConversations(next);
-    await writeConversationsStorage(next);
+    const sorted = [...next].sort((a, b) => b.updatedAt - a.updatedAt);
+    setConversations(sorted);
+    await writeConversationsStorage(sorted);
   }
 
   return (
@@ -108,8 +113,9 @@ export default function Command() {
                 onAction={async () => {
                   const onRename = async (title: string) => {
                     const next = conversations.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
-                    setConversations(next);
-                    await writeConversationsStorage(next);
+                    const sorted = [...next].sort((a, b) => b.updatedAt - a.updatedAt);
+                    setConversations(sorted);
+                    await writeConversationsStorage(sorted);
                   };
                   push(<RenameForm initial={c.title} onSubmit={onRename} />);
                 }}
