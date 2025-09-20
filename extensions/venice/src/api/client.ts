@@ -160,10 +160,19 @@ export class VeniceClient {
       Accept: "application/json",
     };
     if (this.proxyMode) headers["X-App"] = "venice-raycast";
+
+    // Map the settings to the correct parameter names expected by Venice API
+    const mappedSettings = args.settings ? {
+      ...(args.settings.temperature !== undefined && { temperature: args.settings.temperature }),
+      ...(args.settings.top_p !== undefined && { top_p: args.settings.top_p }),
+      ...(args.settings.top_k !== undefined && { top_k: args.settings.top_k }),
+      ...(args.settings.max_tokens !== undefined && { max_tokens: args.settings.max_tokens }),
+    } : {};
+
     const resp = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model: args.model, messages: args.messages, stream: false, ...args.settings }),
+      body: JSON.stringify({ model: args.model, messages: args.messages, stream: false, ...mappedSettings }),
     });
     if (!resp.ok) {
       const msg = await resp.text().catch(() => "");

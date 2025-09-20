@@ -305,13 +305,17 @@ export default function Command() {
             settings: {
               max_tokens: 20,
               temperature: 0.3,
-              ...summarySettings,
+              ...(summarySettings.topP !== undefined && { top_p: summarySettings.topP }),
+              ...(summarySettings.topK !== undefined && { top_k: summarySettings.topK }),
+              ...(summarySettings.maxTokens !== undefined && { max_tokens: summarySettings.maxTokens }),
             },
           });
           const titled: Conversation = { ...withAssistant, title: summary.trim().replace(/\n/g, " ") || "New Chat" };
           await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
-        } catch {
-          // ignore naming errors
+        } catch (e) {
+          // Log the actual error for debugging
+          console.error("Chat naming failed:", e);
+          showToast({ style: Toast.Style.Failure, title: "Chat naming failed", message: String(e) });
         }
       }
     } catch (e) {
