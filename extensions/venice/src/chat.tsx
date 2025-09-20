@@ -57,6 +57,12 @@ export default function Command() {
           setCurrentModelId(saved);
         } else if (model) {
           setCurrentModelId(model.id);
+          // Persist default if missing
+          try {
+            await LocalStorage.setItem("venice_default_model", model.id);
+          } catch {
+            // ignore
+          }
         }
         defaultModelSetRef.current = true;
       })();

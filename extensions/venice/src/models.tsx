@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import AdvancedSettingsForm from "./advanced-settings";
 import { useModels } from "./hooks/useModels";
-import { filterModelsByCapability } from "./utils/models";
+import { filterModelsByCapability, hasCustomModelSettings } from "./utils/models";
 
 import type { VeniceModel } from "./types";
 
@@ -92,17 +92,38 @@ function CapabilityDropdown(props: { value: CapabilityFilter; onChange: (v: Capa
 
 function ModelItem({ model, onRefresh }: { model: VeniceModel; onRefresh: () => void }) {
   const { defaultModelId } = useDefaultModelId();
+  const [hasCustom, setHasCustom] = useState<boolean>(false);
 
-  const accessories: Array<{ tag?: { value: string; color?: Color.ColorLike }; text?: string }> = [
-    { tag: { value: model.capabilities.join(", "), color: Color.Blue } },
-  ];
-
-  // Add Default tag if this model is the default
-  if (defaultModelId === model.id) {
-    accessories.unshift({ tag: { value: "Default", color: Color.Green } });
+  async function refreshCustomState() {
+    try {
+      const custom = await hasCustomModelSettings(model.id);
+      setHasCustom(custom);
+    } catch {
+      setHasCustom(false);
+    }
   }
 
+  useEffect(() => {
+    refreshCustomState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.id]);
+
+  const accessories: Array<{ tag?: { value: string; color?: Color.ColorLike }; text?: string }> = [];
+
+  if (defaultModelId === model.id) {
+    accessories.push({ tag: { value: "Default", color: Color.Green } });
+  }
+  if (hasCustom) {
+    accessories.push({ tag: { value: "Custom", color: Color.Orange } });
+  }
+  accessories.push({ tag: { value: model.capabilities.join(", "), color: Color.Blue } });
   if (model.contextWindow) accessories.push({ text: `${model.contextWindow} tokens` });
+
+  // Wrap onRefresh to also refresh local custom state explicitly
+  const handleRefresh = async () => {
+    await refreshCustomState();
+    onRefresh();
+  };
 
   return (
     <List.Item
@@ -110,7 +131,7 @@ function ModelItem({ model, onRefresh }: { model: VeniceModel; onRefresh: () => 
       title={model.name || model.id}
       subtitle={model.description}
       accessories={accessories}
-      actions={<ModelActions model={model} onRefresh={onRefresh} />}
+      actions={<ModelActions model={model} onRefresh={handleRefresh} />}
     />
   );
 }
