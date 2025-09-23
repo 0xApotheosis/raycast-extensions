@@ -43,14 +43,19 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
   function validateSettings(): string | null {
     // Validate temperature
     if (settings.temperature !== undefined) {
-      if (typeof settings.temperature !== 'number' || isNaN(settings.temperature) || settings.temperature < 0 || settings.temperature > 2) {
+      if (
+        typeof settings.temperature !== "number" ||
+        isNaN(settings.temperature) ||
+        settings.temperature < 0 ||
+        settings.temperature > 2
+      ) {
         return "Temperature must be a number between 0.0 and 2.0";
       }
     }
 
     // Validate topP
     if (settings.topP !== undefined) {
-      if (typeof settings.topP !== 'number' || isNaN(settings.topP) || settings.topP < 0 || settings.topP > 1) {
+      if (typeof settings.topP !== "number" || isNaN(settings.topP) || settings.topP < 0 || settings.topP > 1) {
         return "Top P must be a number between 0.0 and 1.0";
       }
     }

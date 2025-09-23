@@ -90,7 +90,7 @@ function ModelItem({
   model,
   onRefresh,
   defaultModelId,
-  setDefaultModelId
+  setDefaultModelId,
 }: {
   model: VeniceModel;
   onRefresh: () => void;
@@ -149,11 +149,7 @@ function ModelItem({
       accessories={accessories}
       actions={
         <ActionPanel>
-          <Action
-            title="Set as Default Model"
-            icon={Icon.Checkmark}
-            onAction={handleSetAsDefault}
-          />
+          <Action title="Set as Default Model" icon={Icon.Checkmark} onAction={handleSetAsDefault} />
           <Action.Push
             title="Advanced Settings"
             icon={Icon.Gear}

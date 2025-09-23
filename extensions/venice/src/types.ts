@@ -1,11 +1,60 @@
-export type VeniceCapability = "chat" | "image";
+export interface ModelPricing {
+  input: {
+    usd: number;
+    vcu: number;
+    diem: number;
+  };
+  output: {
+    usd: number;
+    vcu: number;
+    diem: number;
+  };
+}
+
+export interface ModelCapabilities {
+  optimizedForCode: boolean;
+  quantization: string;
+  supportsFunctionCalling: boolean;
+  supportsReasoning: boolean;
+  supportsResponseSchema: boolean;
+  supportsVision: boolean;
+  supportsWebSearch: boolean;
+  supportsLogProbs: boolean;
+}
+
+export interface ModelConstraints {
+  temperature: {
+    default: number;
+  };
+  top_p: {
+    default: number;
+  };
+}
+
+export interface ModelSpec {
+  pricing: ModelPricing;
+  availableContextTokens: number;
+  capabilities: ModelCapabilities;
+  constraints: ModelConstraints;
+  name: string;
+  modelSource: string;
+  offline: boolean;
+  traits: string[];
+}
 
 export interface VeniceModel {
+  created: number;
   id: string;
-  name: string;
-  description?: string;
-  capabilities: VeniceCapability[];
-  contextWindow?: number;
+  model_spec: ModelSpec;
+  object: string;
+  owned_by: string;
+  type: string;
+}
+
+export interface ModelsListResponse {
+  data: VeniceModel[];
+  object: string;
+  type: string;
 }
 
 export interface ModelSettings {
