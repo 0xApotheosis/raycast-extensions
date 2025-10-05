@@ -42,13 +42,19 @@ export interface ModelSpec {
   traits: string[];
 }
 
+export type VeniceCapability = "chat" | "image";
+
 export interface VeniceModel {
-  created: number;
   id: string;
-  model_spec: ModelSpec;
-  object: string;
-  owned_by: string;
-  type: string;
+  name: string;
+  description: string;
+  capabilities: VeniceCapability[];
+  contextWindow?: number;
+  created?: number;
+  model_spec?: ModelSpec;
+  object?: string;
+  owned_by?: string;
+  type?: string;
 }
 
 export interface ModelsListResponse {

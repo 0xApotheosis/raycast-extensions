@@ -58,6 +58,10 @@ Local-first AI chat and image generation for Raycast using the Venice API.
 - [ ] Add Quick Actions to copy last response or regenerate
 - [ ] Implement slash-commands in composer (e.g., /model, /temp, /image)
 
+## Bugs
+
+[ ] 
+
 ## Notes
 
 - All data stays local using Raycast `LocalStorage`, `Cache`, and `preferences` APIs.

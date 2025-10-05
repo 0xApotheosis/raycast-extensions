@@ -293,7 +293,7 @@ export default function Command() {
           const summary = await client2.completeChat({
             model: currentModel.id,
             messages: [
-              { role: "system", content: "Summarize the conversation title in 5 words or fewer." },
+              { role: "system", content: "Summarize the conversation for a title in 5 words or fewer." },
               {
                 role: "user",
                 content: withAssistant.messages
@@ -309,7 +309,11 @@ export default function Command() {
               ...(summarySettings.topK !== undefined && { top_k: summarySettings.topK }),
               ...(summarySettings.maxTokens !== undefined && { max_tokens: summarySettings.maxTokens }),
             },
+            veniceParameters: {
+              disable_thinking: true,
+            },
           });
+          console.log("Summary:", summary);
           const titled: Conversation = { ...withAssistant, title: summary.trim().replace(/\n/g, " ") || "New Chat" };
           await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
         } catch (e) {

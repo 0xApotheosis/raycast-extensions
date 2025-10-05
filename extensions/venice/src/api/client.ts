@@ -1,6 +1,6 @@
 import { getPreferenceValues } from "@raycast/api";
 
-import type { VeniceModel, StreamChunk, VeniceCapability } from "../types";
+import type { VeniceModel, StreamChunk, VeniceCapability, VeniceParameters } from "../types";
 
 type Preferences = {
   veniceApiKey?: string;
@@ -154,6 +154,7 @@ export class VeniceClient {
     model: string;
     messages: { role: string; content: string }[];
     settings?: { temperature?: number; top_p?: number; top_k?: number; max_tokens?: number };
+    veniceParameters?: VeniceParameters;
   }): Promise<string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -172,7 +173,13 @@ export class VeniceClient {
     const resp = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model: args.model, messages: args.messages, stream: false, ...mappedSettings }),
+      body: JSON.stringify({ 
+        model: args.model, 
+        messages: args.messages, 
+        stream: false, 
+        ...mappedSettings,
+        ...(args.veniceParameters && { venice_parameters: args.veniceParameters }),
+      }),
     });
     if (!resp.ok) {
       const msg = await resp.text().catch(() => "");
