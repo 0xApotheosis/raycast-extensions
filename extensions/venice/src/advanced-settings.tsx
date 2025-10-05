@@ -1,6 +1,8 @@
 import { ActionPanel, Action, Form, showToast, Toast, LocalStorage } from "@raycast/api";
 import { useEffect, useState } from "react";
 
+import { DEFAULT_MODEL_SETTINGS, STORAGE_KEYS } from "./constants";
+
 import type { ModelSettings, VeniceModel } from "./types";
 
 interface AdvancedSettingsFormProps {
@@ -9,19 +11,14 @@ interface AdvancedSettingsFormProps {
 }
 
 export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSettingsFormProps) {
-  const [settings, setSettings] = useState<ModelSettings>({
-    temperature: 0.7,
-    topP: 0.9,
-    topK: 40,
-    maxTokens: 2048,
-  });
-  const [temperatureInput, setTemperatureInput] = useState(settings.temperature.toString());
+  const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL_SETTINGS);
+  const [temperatureInput, setTemperatureInput] = useState(DEFAULT_MODEL_SETTINGS.temperature.toString());
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        const saved = await LocalStorage.getItem<string>(`venice_settings_${model.id}`);
+        const saved = await LocalStorage.getItem<string>(STORAGE_KEYS.MODEL_SETTINGS(model.id));
         if (saved) {
           const parsed = JSON.parse(saved) as ModelSettings;
           setSettings(parsed);
@@ -90,7 +87,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     }
 
     try {
-      await LocalStorage.setItem(`venice_settings_${model.id}`, JSON.stringify(settings));
+      await LocalStorage.setItem(STORAGE_KEYS.MODEL_SETTINGS(model.id), JSON.stringify(settings));
       await showToast({
         style: Toast.Style.Success,
         title: "Settings saved",
@@ -107,16 +104,10 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
   }
 
   async function resetToDefaults() {
-    const defaults: ModelSettings = {
-      temperature: 0.7,
-      topP: 0.9,
-      topK: 40,
-      maxTokens: 2048,
-    };
-    setSettings(defaults);
-    setTemperatureInput(defaults.temperature.toString());
+    setSettings(DEFAULT_MODEL_SETTINGS);
+    setTemperatureInput(DEFAULT_MODEL_SETTINGS.temperature.toString());
     try {
-      await LocalStorage.removeItem(`venice_settings_${model.id}`);
+      await LocalStorage.removeItem(STORAGE_KEYS.MODEL_SETTINGS(model.id));
       await showToast({
         style: Toast.Style.Success,
         title: "Settings reset",

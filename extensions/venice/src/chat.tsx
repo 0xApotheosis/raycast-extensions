@@ -2,17 +2,18 @@ import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confir
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { VeniceClient } from "./api/client";
+import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
 import { useDefaultModel } from "./hooks/useDefaultModel";
 import {
-  readConversationsCache,
   loadConversationsFromStorage,
   writeConversationsStorage,
-  readLastConversationIdCache,
   loadLastConversationIdFromStorage,
   writeLastConversationId,
   type Conversation,
 } from "./storage/conversations";
+import { conversationToMarkdown } from "./utils/markdown";
 import { getModelSettings, hasCustomModelSettings } from "./utils/models";
+import { sortConversationsByDate } from "./utils/sorting";
 
 import type { VeniceModel, ModelSettings } from "./types";
 
@@ -20,16 +21,8 @@ export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
   const [currentModelId, setCurrentModelId] = useState<string | undefined>(undefined);
   const [searchText, setSearchText] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>(() => {
-    const cached = readConversationsCache() ?? [];
-    return [...cached].sort((a, b) => b.updatedAt - a.updatedAt);
-  });
-  const [currentId, setCurrentId] = useState<string | undefined>(() => {
-    const cached = readConversationsCache() ?? [];
-    const sorted = [...cached].sort((a, b) => b.updatedAt - a.updatedAt);
-    const lastId = readLastConversationIdCache();
-    return lastId && sorted.some((c) => c.id === lastId) ? lastId : sorted[0]?.id;
-  });
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [currentId, setCurrentId] = useState<string | undefined>(undefined);
   const [stream, setStream] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [caretOn, setCaretOn] = useState(false);
@@ -44,14 +37,14 @@ export default function Command() {
     // Load the default model when models become available
     if (model && !defaultModelSetRef.current) {
       (async () => {
-        const saved = await LocalStorage.getItem<string>("venice_default_model");
+        const saved = await LocalStorage.getItem<string>(STORAGE_KEYS.DEFAULT_MODEL);
         if (saved && models?.find((m) => m.id === saved)) {
           setCurrentModelId(saved);
         } else if (model) {
           setCurrentModelId(model.id);
           // Persist default if missing
           try {
-            await LocalStorage.setItem("venice_default_model", model.id);
+            await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, model.id);
           } catch {
             // ignore
           }
@@ -64,7 +57,7 @@ export default function Command() {
   // Additional check: if we have models but currentModelId is not set correctly, fix it
   useEffect(() => {
     if (models && models.length > 0 && currentModelId) {
-      const saved = LocalStorage.getItem<string>("venice_default_model");
+      const saved = LocalStorage.getItem<string>(STORAGE_KEYS.DEFAULT_MODEL);
       saved
         .then((savedId) => {
           if (savedId && savedId !== currentModelId && models.find((m) => m.id === savedId)) {
@@ -84,10 +77,8 @@ export default function Command() {
         const stored = await loadConversationsFromStorage();
         const lastId = await loadLastConversationIdFromStorage();
         if (stored && stored.length > 0) {
-          const sorted = [...stored].sort((a, b) => b.updatedAt - a.updatedAt);
+          const sorted = sortConversationsByDate(stored);
           setConversations(sorted);
-          // Refresh synchronous cache for future warm-starts
-          await writeConversationsStorage(sorted);
           const exists = lastId && sorted.some((c) => c.id === lastId);
           setCurrentId(exists ? lastId : sorted[0]?.id);
         }
@@ -133,7 +124,7 @@ export default function Command() {
 
   async function onModelChange(modelId: string) {
     setCurrentModelId(modelId);
-    await LocalStorage.setItem("venice_default_model", modelId);
+    await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, modelId);
     if (currentConversation) {
       const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
       await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
@@ -146,7 +137,7 @@ export default function Command() {
       setCaretOn(false);
       return;
     }
-    const id = setInterval(() => setCaretOn((v) => !v), 500);
+    const id = setInterval(() => setCaretOn((v) => !v), UI_CONSTANTS.CARET_BLINK_INTERVAL_MS);
     return () => clearInterval(id);
   }, [isStreaming]);
 
@@ -163,16 +154,8 @@ export default function Command() {
     return parts.join("\n\n---\n\n");
   }, [currentConversation, stream, isStreaming, caretOn]);
 
-  function conversationToMarkdown(conv: Conversation): string {
-    const parts = conv.messages.map((m) => {
-      const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
-      return `**${name}:**\n${m.content}`;
-    });
-    return parts.join("\n\n---\n\n");
-  }
-
   async function save(updated: Conversation[]): Promise<Conversation[]> {
-    const sorted = [...updated].sort((a, b) => b.updatedAt - a.updatedAt);
+    const sorted = sortConversationsByDate(updated);
     setConversations(sorted);
     await writeConversationsStorage(sorted);
     return sorted;
@@ -186,7 +169,7 @@ export default function Command() {
     }
     // 2) Use saved default if present and valid
     try {
-      const saved = await LocalStorage.getItem<string>("venice_default_model");
+      const saved = await LocalStorage.getItem<string>(STORAGE_KEYS.DEFAULT_MODEL);
       if (saved && models?.some((m) => m.id === saved)) {
         return saved;
       }
@@ -203,7 +186,7 @@ export default function Command() {
     const preferredModelId = await resolvePreferredModelId();
     const conv: Conversation = {
       id: `${Date.now()}`,
-      title: "New Chat",
+      title: UI_CONSTANTS.NEW_CHAT_TITLE,
       modelId: preferredModelId ?? "",
       messages: [],
       createdAt: Date.now(),
@@ -278,25 +261,25 @@ export default function Command() {
       const finalConversations = await save(updatedConversations.map((c) => (c.id === conv.id ? withAssistant : c)));
 
       // Auto-name after first assistant reply
-      if (withAssistant.messages.length >= 2 && withAssistant.title === "New Chat" && currentModel) {
+      if (withAssistant.messages.length >= 2 && withAssistant.title === UI_CONSTANTS.NEW_CHAT_TITLE && currentModel) {
         try {
           const client2 = new VeniceClient();
           const summarySettings = modelSettings[currentModel.id] || ({} as ModelSettings);
           const summary = await client2.completeChat({
             model: currentModel.id,
             messages: [
-              { role: "system", content: "Summarize the conversation for a title in 5 words or fewer." },
+              { role: "system", content: UI_CONSTANTS.AUTO_NAME_SYSTEM_PROMPT },
               {
                 role: "user",
                 content: withAssistant.messages
                   .map((m) => `${m.role}: ${m.content}`)
                   .join("\n\n")
-                  .slice(0, 1500),
+                  .slice(0, UI_CONSTANTS.AUTO_NAME_PROMPT_MAX_LENGTH),
               },
             ],
             settings: {
-              max_tokens: 20,
-              temperature: 0.3,
+              max_tokens: UI_CONSTANTS.AUTO_NAME_MAX_TOKENS,
+              temperature: UI_CONSTANTS.AUTO_NAME_TEMPERATURE,
               ...(summarySettings.topP !== undefined && { top_p: summarySettings.topP }),
               ...(summarySettings.topK !== undefined && { top_k: summarySettings.topK }),
               ...(summarySettings.maxTokens !== undefined && { max_tokens: summarySettings.maxTokens }),
@@ -305,7 +288,10 @@ export default function Command() {
               disable_thinking: true,
             },
           });
-          const titled: Conversation = { ...withAssistant, title: summary.trim().replace(/\n/g, " ") || "New Chat" };
+          const titled: Conversation = {
+            ...withAssistant,
+            title: summary.trim().replace(/\n/g, " ") || UI_CONSTANTS.NEW_CHAT_TITLE,
+          };
           await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
         } catch (e) {
           // Log the actual error for debugging
@@ -325,7 +311,7 @@ export default function Command() {
     const preferredModelId = await resolvePreferredModelId();
     const conv: Conversation = {
       id,
-      title: "New Chat",
+      title: UI_CONSTANTS.NEW_CHAT_TITLE,
       modelId: preferredModelId ?? "",
       messages: [],
       createdAt: Date.now(),

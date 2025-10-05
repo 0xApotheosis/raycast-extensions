@@ -2,6 +2,7 @@ import { ActionPanel, Action, Icon, List, Color, showToast, Toast, LocalStorage 
 import { useEffect, useMemo, useState } from "react";
 
 import AdvancedSettingsForm from "./advanced-settings";
+import { STORAGE_KEYS } from "./constants";
 import { useModels } from "./hooks/useModels";
 import { filterModelsByCapability, hasCustomModelSettings } from "./utils/models";
 
@@ -16,7 +17,7 @@ function useDefaultModelId() {
 
     const loadDefaultModel = async () => {
       try {
-        const saved = await LocalStorage.getItem<string>("venice_default_model");
+        const saved = await LocalStorage.getItem<string>(STORAGE_KEYS.DEFAULT_MODEL);
         if (isMounted) {
           setDefaultModelId(saved);
         }
@@ -132,7 +133,7 @@ function ModelItem({
 
   const handleSetAsDefault = async () => {
     try {
-      await LocalStorage.setItem("venice_default_model", model.id);
+      await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, model.id);
       setDefaultModelId(model.id); // Update state immediately - this will be shared across all ModelItems
       await showToast({ style: Toast.Style.Success, title: `${model.name || model.id} set as default` });
       onRefresh(); // Refresh the models list

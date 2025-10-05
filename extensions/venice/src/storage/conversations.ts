@@ -1,11 +1,10 @@
 import { Cache, LocalStorage } from "@raycast/api";
 
+import { STORAGE_KEYS } from "../constants";
+
 import type { ChatMessage } from "../types";
 
 const cache = new Cache();
-
-const STORAGE_KEY = "venice_conversations_v1";
-const LAST_ID_KEY = "venice_last_conversation_id";
 
 // Local type for conversations with full messages (used by UI components)
 export type Conversation = {
@@ -17,19 +16,9 @@ export type Conversation = {
   updatedAt: number;
 };
 
-export function readConversationsCache(): Conversation[] | undefined {
-  const raw = cache.get(STORAGE_KEY);
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(raw) as Conversation[];
-  } catch {
-    return undefined;
-  }
-}
-
 export async function loadConversationsFromStorage(): Promise<Conversation[] | undefined> {
   try {
-    const raw = await LocalStorage.getItem<string>(STORAGE_KEY);
+    const raw = await LocalStorage.getItem<string>(STORAGE_KEYS.CONVERSATIONS);
     if (!raw) return undefined;
     return JSON.parse(raw) as Conversation[];
   } catch {
@@ -41,24 +30,19 @@ export async function writeConversationsStorage(conversations: Conversation[]): 
   // Write-through: persistent LocalStorage + synchronous Cache for instant reads
   const data = JSON.stringify(conversations);
   try {
-    await LocalStorage.setItem(STORAGE_KEY, data);
-    cache.set(STORAGE_KEY, data);
+    await LocalStorage.setItem(STORAGE_KEYS.CONVERSATIONS, data);
+    cache.set(STORAGE_KEYS.CONVERSATIONS, data);
   } catch (error) {
     // If LocalStorage fails, still update cache as a fallback
     // This ensures the cache stays in sync even if persistent storage fails
-    cache.set(STORAGE_KEY, data);
+    cache.set(STORAGE_KEYS.CONVERSATIONS, data);
     throw error;
   }
 }
 
-export function readLastConversationIdCache(): string | undefined {
-  const id = cache.get(LAST_ID_KEY);
-  return id || undefined;
-}
-
 export async function loadLastConversationIdFromStorage(): Promise<string | undefined> {
   try {
-    const id = await LocalStorage.getItem<string>(LAST_ID_KEY);
+    const id = await LocalStorage.getItem<string>(STORAGE_KEYS.LAST_CONVERSATION);
     return id ?? undefined;
   } catch {
     return undefined;
@@ -67,11 +51,11 @@ export async function loadLastConversationIdFromStorage(): Promise<string | unde
 
 export async function writeLastConversationId(id: string): Promise<void> {
   try {
-    await LocalStorage.setItem(LAST_ID_KEY, id);
-    cache.set(LAST_ID_KEY, id);
+    await LocalStorage.setItem(STORAGE_KEYS.LAST_CONVERSATION, id);
+    cache.set(STORAGE_KEYS.LAST_CONVERSATION, id);
   } catch (error) {
     // If LocalStorage fails, still update cache as a fallback
-    cache.set(LAST_ID_KEY, id);
+    cache.set(STORAGE_KEYS.LAST_CONVERSATION, id);
     throw error;
   }
 }

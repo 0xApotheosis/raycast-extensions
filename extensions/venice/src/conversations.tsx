@@ -18,6 +18,8 @@ import {
   writeLastConversationId,
   type Conversation,
 } from "./storage/conversations";
+import { conversationToMarkdown } from "./utils/markdown";
+import { sortConversationsByDate } from "./utils/sorting";
 
 export default function Command() {
   const { push } = useNavigation();
@@ -29,7 +31,7 @@ export default function Command() {
       const stored = await loadConversationsFromStorage();
       if (stored) {
         try {
-          setConversations(stored.sort((a, b) => b.updatedAt - a.updatedAt));
+          setConversations(sortConversationsByDate(stored));
         } catch {
           // ignore parse errors
         }
@@ -50,14 +52,6 @@ export default function Command() {
     });
   }, [conversations, searchText]);
 
-  function toMarkdown(conv: Conversation): string {
-    const parts = conv.messages.map((m) => {
-      const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
-      return `**${name}:**\n${m.content}`;
-    });
-    return parts.join("\n\n---\n\n");
-  }
-
   async function remove(id: string) {
     const ok = await confirmAlert({
       title: "Delete Conversation?",
@@ -67,7 +61,7 @@ export default function Command() {
     });
     if (!ok) return;
     const next = conversations.filter((c) => c.id !== id);
-    const sorted = [...next].sort((a, b) => b.updatedAt - a.updatedAt);
+    const sorted = sortConversationsByDate(next);
     setConversations(sorted);
     await writeConversationsStorage(sorted);
   }
@@ -85,7 +79,7 @@ export default function Command() {
           id={c.id}
           title={c.title}
           accessories={[{ date: new Date(c.updatedAt) }]}
-          detail={<List.Item.Detail markdown={toMarkdown(c)} />}
+          detail={<List.Item.Detail markdown={conversationToMarkdown(c)} />}
           actions={
             <ActionPanel>
               <Action
@@ -96,14 +90,14 @@ export default function Command() {
                   await launchCommand({ name: "chat", type: LaunchType.UserInitiated });
                 }}
               />
-              <Action.CopyToClipboard title="Copy Markdown" content={toMarkdown(c)} />
+              <Action.CopyToClipboard title="Copy Markdown" content={conversationToMarkdown(c)} />
               <Action
                 title="Rename"
                 icon={Icon.Pencil}
                 onAction={async () => {
                   const onRename = async (title: string) => {
                     const next = conversations.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
-                    const sorted = [...next].sort((a, b) => b.updatedAt - a.updatedAt);
+                    const sorted = sortConversationsByDate(next);
                     setConversations(sorted);
                     await writeConversationsStorage(sorted);
                   };
