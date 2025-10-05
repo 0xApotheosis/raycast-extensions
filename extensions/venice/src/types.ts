@@ -80,7 +80,7 @@ export interface ChatMessage {
   createdAt: number; // epoch ms
 }
 
-export interface Conversation {
+export interface StoredConversation {
   id: string;
   title: string;
   modelId: string;

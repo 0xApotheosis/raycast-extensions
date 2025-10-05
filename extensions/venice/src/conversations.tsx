@@ -16,18 +16,8 @@ import {
   loadConversationsFromStorage,
   writeConversationsStorage,
   writeLastConversationId,
+  type Conversation,
 } from "./storage/conversations";
-
-import type { ChatMessage } from "./types";
-
-type Conversation = {
-  id: string;
-  title: string;
-  modelId: string;
-  messages: ChatMessage[];
-  createdAt: number;
-  updatedAt: number;
-};
 
 export default function Command() {
   const { push } = useNavigation();
@@ -36,7 +26,7 @@ export default function Command() {
 
   useEffect(() => {
     (async () => {
-      const stored = await loadConversationsFromStorage<Conversation>();
+      const stored = await loadConversationsFromStorage();
       if (stored) {
         try {
           setConversations(stored.sort((a, b) => b.updatedAt - a.updatedAt));

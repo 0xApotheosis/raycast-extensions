@@ -10,19 +10,11 @@ import {
   readLastConversationIdCache,
   loadLastConversationIdFromStorage,
   writeLastConversationId,
+  type Conversation,
 } from "./storage/conversations";
 import { getModelSettings, hasCustomModelSettings } from "./utils/models";
 
-import type { VeniceModel, ChatMessage, ModelSettings } from "./types";
-
-type Conversation = {
-  id: string;
-  title: string;
-  modelId: string;
-  messages: ChatMessage[];
-  createdAt: number;
-  updatedAt: number;
-};
+import type { VeniceModel, ModelSettings } from "./types";
 
 export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
@@ -313,7 +305,6 @@ export default function Command() {
               disable_thinking: true,
             },
           });
-          console.log("Summary:", summary);
           const titled: Conversation = { ...withAssistant, title: summary.trim().replace(/\n/g, " ") || "New Chat" };
           await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
         } catch (e) {

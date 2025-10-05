@@ -1,11 +1,21 @@
 import { Cache, LocalStorage } from "@raycast/api";
 
-import type { Conversation } from "./types";
+import type { ChatMessage } from "../types";
 
 const cache = new Cache();
 
 const STORAGE_KEY = "venice_conversations_v1";
 const LAST_ID_KEY = "venice_last_conversation_id";
+
+// Local type for conversations with full messages (used by UI components)
+export type Conversation = {
+  id: string;
+  title: string;
+  modelId: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+};
 
 export function readConversationsCache(): Conversation[] | undefined {
   const raw = cache.get(STORAGE_KEY);

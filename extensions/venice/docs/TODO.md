@@ -49,7 +49,7 @@ Local-first AI chat and image generation for Raycast using the Venice API.
 - [ ] Support choosing number of images to generate
 - [ ] Index and search generated images by prompt and metadata
 - [x] Verify ESLint + Prettier configuration and Raycast lint rules
-- [ ] Enable TypeScript strict mode and resolve types
+- [x] Enable TypeScript strict mode and resolve types
 - [ ] Implement performance optimizations and caching (useCachedPromise/state)
 - [ ] Add robust error handling, retries, and abort on navigation
 - [ ] Prepare for Raycast Store submission (README, metadata, privacy)
