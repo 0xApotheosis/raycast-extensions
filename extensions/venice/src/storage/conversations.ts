@@ -6,7 +6,9 @@ import type { ChatMessage } from "../types";
 
 const cache = new Cache();
 
-// Local type for conversations with full messages (used by UI components)
+/**
+ * Conversation type with full messages (used by UI components).
+ */
 export type Conversation = {
   id: string;
   title: string;
@@ -16,6 +18,11 @@ export type Conversation = {
   updatedAt: number;
 };
 
+/**
+ * Loads conversations from LocalStorage.
+ *
+ * @returns Array of conversations or undefined if not found/error
+ */
 export async function loadConversationsFromStorage(): Promise<Conversation[] | undefined> {
   try {
     const raw = await LocalStorage.getItem<string>(STORAGE_KEYS.CONVERSATIONS);
@@ -26,6 +33,11 @@ export async function loadConversationsFromStorage(): Promise<Conversation[] | u
   }
 }
 
+/**
+ * Writes conversations to LocalStorage with cache write-through.
+ *
+ * @param conversations - Array of conversations to store
+ */
 export async function writeConversationsStorage(conversations: Conversation[]): Promise<void> {
   // Write-through: persistent LocalStorage + synchronous Cache for instant reads
   const data = JSON.stringify(conversations);
@@ -40,6 +52,11 @@ export async function writeConversationsStorage(conversations: Conversation[]): 
   }
 }
 
+/**
+ * Loads the last active conversation ID from LocalStorage.
+ *
+ * @returns The last conversation ID or undefined if not found
+ */
 export async function loadLastConversationIdFromStorage(): Promise<string | undefined> {
   try {
     const id = await LocalStorage.getItem<string>(STORAGE_KEYS.LAST_CONVERSATION);
@@ -49,6 +66,11 @@ export async function loadLastConversationIdFromStorage(): Promise<string | unde
   }
 }
 
+/**
+ * Writes the last active conversation ID to LocalStorage with cache write-through.
+ *
+ * @param id - The conversation ID to store
+ */
 export async function writeLastConversationId(id: string): Promise<void> {
   try {
     await LocalStorage.setItem(STORAGE_KEYS.LAST_CONVERSATION, id);

@@ -18,10 +18,6 @@ export class VeniceClient {
     this.proxyMode = true;
   }
 
-  private async getAuthHeader(): Promise<string | undefined> {
-    return undefined;
-  }
-
   async listModels(
     type: "all" | "text" | "image" | "tts" | "embedding" | "upscale" | "inpaint" = "all",
   ): Promise<VeniceModel[]> {

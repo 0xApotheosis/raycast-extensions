@@ -1,94 +1,30 @@
 import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { VeniceClient } from "./api/client";
 import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
+import { useChatModel } from "./hooks/useChatModel";
+import { useConversationManager } from "./hooks/useConversationManager";
 import { useDefaultModel } from "./hooks/useDefaultModel";
-import {
-  loadConversationsFromStorage,
-  writeConversationsStorage,
-  loadLastConversationIdFromStorage,
-  writeLastConversationId,
-  type Conversation,
-} from "./storage/conversations";
+import { useStreamingChat } from "./hooks/useStreamingChat";
+import { type Conversation } from "./storage/conversations";
+import { handleError } from "./utils/errors";
 import { conversationToMarkdown } from "./utils/markdown";
 import { getModelSettings, hasCustomModelSettings } from "./utils/models";
-import { sortConversationsByDate } from "./utils/sorting";
 
 import type { VeniceModel, ModelSettings } from "./types";
 
 export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
-  const [currentModelId, setCurrentModelId] = useState<string | undefined>(undefined);
+  const { currentModelId, setCurrentModelId } = useChatModel(models, model);
+  const { conversations, currentId, save, resolvePreferredModelId, selectConversation, pendingSelectIdRef } =
+    useConversationManager();
+  const { stream, setStream, isStreaming, setIsStreaming, caretOn, abortRef, startStreaming, resetStream } =
+    useStreamingChat();
+
   const [searchText, setSearchText] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [currentId, setCurrentId] = useState<string | undefined>(undefined);
-  const [stream, setStream] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [caretOn, setCaretOn] = useState(false);
   const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
   const [customSettingsModels, setCustomSettingsModels] = useState<Set<string>>(new Set());
-  const abortRef = useRef<AbortController | null>(null);
-  const pendingSelectIdRef = useRef<string | null>(null);
-  const isInitializingRef = useRef<boolean>(true);
-  const defaultModelSetRef = useRef<boolean>(false);
-
-  useEffect(() => {
-    // Load the default model when models become available
-    if (model && !defaultModelSetRef.current) {
-      (async () => {
-        const saved = await LocalStorage.getItem<string>(STORAGE_KEYS.DEFAULT_MODEL);
-        if (saved && models?.find((m) => m.id === saved)) {
-          setCurrentModelId(saved);
-        } else if (model) {
-          setCurrentModelId(model.id);
-          // Persist default if missing
-          try {
-            await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, model.id);
-          } catch {
-            // ignore
-          }
-        }
-        defaultModelSetRef.current = true;
-      })();
-    }
-  }, [model, models]);
-
-  // Additional check: if we have models but currentModelId is not set correctly, fix it
-  useEffect(() => {
-    if (models && models.length > 0 && currentModelId) {
-      const saved = LocalStorage.getItem<string>(STORAGE_KEYS.DEFAULT_MODEL);
-      saved
-        .then((savedId) => {
-          if (savedId && savedId !== currentModelId && models.find((m) => m.id === savedId)) {
-            setCurrentModelId(savedId);
-          }
-        })
-        .catch(() => {
-          // Ignore errors
-        });
-    }
-  }, [models, currentModelId]);
-
-  // Load conversations on mount and reconcile selection from persistent storage
-  useEffect(() => {
-    (async () => {
-      try {
-        const stored = await loadConversationsFromStorage();
-        const lastId = await loadLastConversationIdFromStorage();
-        if (stored && stored.length > 0) {
-          const sorted = sortConversationsByDate(stored);
-          setConversations(sorted);
-          const exists = lastId && sorted.some((c) => c.id === lastId);
-          setCurrentId(exists ? lastId : sorted[0]?.id);
-        }
-      } catch {
-        // ignore parse errors
-      } finally {
-        isInitializingRef.current = false;
-      }
-    })();
-  }, []);
 
   useEffect(() => {
     if (error) showToast({ style: Toast.Style.Failure, title: "Models error", message: String(error) });
@@ -131,16 +67,6 @@ export default function Command() {
     }
   }
 
-  // Blink caret while streaming
-  useEffect(() => {
-    if (!isStreaming) {
-      setCaretOn(false);
-      return;
-    }
-    const id = setInterval(() => setCaretOn((v) => !v), UI_CONSTANTS.CARET_BLINK_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [isStreaming]);
-
   const currentMarkdown = useMemo(() => {
     if (!currentConversation) return "";
     const parts = currentConversation.messages.map((m) => {
@@ -154,36 +80,9 @@ export default function Command() {
     return parts.join("\n\n---\n\n");
   }, [currentConversation, stream, isStreaming, caretOn]);
 
-  async function save(updated: Conversation[]): Promise<Conversation[]> {
-    const sorted = sortConversationsByDate(updated);
-    setConversations(sorted);
-    await writeConversationsStorage(sorted);
-    return sorted;
-  }
-
-  // Determine the preferred model id for new chats
-  async function resolvePreferredModelId(): Promise<string | undefined> {
-    // 1) Use currentModelId if it exists and is valid
-    if (currentModelId && models?.some((m) => m.id === currentModelId)) {
-      return currentModelId;
-    }
-    // 2) Use saved default if present and valid
-    try {
-      const saved = await LocalStorage.getItem<string>(STORAGE_KEYS.DEFAULT_MODEL);
-      if (saved && models?.some((m) => m.id === saved)) {
-        return saved;
-      }
-    } catch {
-      // ignore
-    }
-    // 3) Fall back to hook-provided first model, then list first
-    if (model?.id) return model.id;
-    return models?.[0]?.id;
-  }
-
   async function ensureConversation(): Promise<{ conv: Conversation; list: Conversation[] }> {
     if (currentConversation) return { conv: currentConversation, list: conversations };
-    const preferredModelId = await resolvePreferredModelId();
+    const preferredModelId = await resolvePreferredModelId(currentModelId, models, model);
     const conv: Conversation = {
       id: `${Date.now()}`,
       title: UI_CONSTANTS.NEW_CHAT_TITLE,
@@ -194,7 +93,7 @@ export default function Command() {
     };
     const next = [conv, ...conversations];
     const updatedList = await save(next);
-    setCurrentId(conv.id);
+    await selectConversation(conv.id);
     // Ensure UI state reflects the preferred model ASAP
     if (preferredModelId && preferredModelId !== currentModelId) {
       setCurrentModelId(preferredModelId);
@@ -205,8 +104,7 @@ export default function Command() {
   async function onSend() {
     const content = searchText.trim();
     if (!content || !currentModel) return;
-    setStream("");
-    setIsStreaming(true);
+    startStreaming();
     const { conv, list } = await ensureConversation();
     const now = Date.now();
     const withUser: Conversation = {
@@ -220,8 +118,6 @@ export default function Command() {
     setSearchText("");
 
     const client = new VeniceClient();
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
     let assistantText = "";
     try {
       const settings = modelSettings[currentModel.id] || ({} as ModelSettings);
@@ -257,7 +153,7 @@ export default function Command() {
         ],
         updatedAt: doneAt,
       };
-      setStream("");
+      resetStream();
       const finalConversations = await save(updatedConversations.map((c) => (c.id === conv.id ? withAssistant : c)));
 
       // Auto-name after first assistant reply
@@ -294,13 +190,11 @@ export default function Command() {
           };
           await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
         } catch (e) {
-          // Log the actual error for debugging
-          console.error("Chat naming failed:", e);
-          showToast({ style: Toast.Style.Failure, title: "Chat naming failed", message: String(e) });
+          await handleError(e, "Chat naming");
         }
       }
     } catch (e) {
-      showToast({ style: Toast.Style.Failure, title: "Chat failed", message: String(e) });
+      await handleError(e, "Chat");
     } finally {
       setIsStreaming(false);
     }
@@ -308,7 +202,7 @@ export default function Command() {
 
   async function onNewChat() {
     const id = `${Date.now()}`;
-    const preferredModelId = await resolvePreferredModelId();
+    const preferredModelId = await resolvePreferredModelId(currentModelId, models, model);
     const conv: Conversation = {
       id,
       title: UI_CONSTANTS.NEW_CHAT_TITLE,
@@ -320,9 +214,8 @@ export default function Command() {
     const next = [conv, ...conversations];
     await save(next);
     pendingSelectIdRef.current = id;
-    setCurrentId(id);
-    await writeLastConversationId(id);
-    setStream("");
+    await selectConversation(id);
+    resetStream();
     // Ensure UI model picker reflects the preferred model immediately
     if (preferredModelId && preferredModelId !== currentModelId) {
       setCurrentModelId(preferredModelId);
@@ -342,9 +235,8 @@ export default function Command() {
     const next = conversations.filter((c) => c.id !== targetId);
     await save(next);
     if (currentId === targetId) {
-      setCurrentId(next[0]?.id);
-      if (next[0]?.id) await writeLastConversationId(next[0].id);
-      setStream("");
+      await selectConversation(next[0]?.id);
+      resetStream();
     }
   }
 
@@ -369,23 +261,7 @@ export default function Command() {
           ))}
         </List.Dropdown>
       }
-      onSelectionChange={async (id) => {
-        if (isInitializingRef.current) {
-          return; // ignore selection changes during initial load to prevent flicker
-        }
-        const next = id ?? undefined;
-        // Suppress transient selection changes when we just created a chat
-        if (pendingSelectIdRef.current) {
-          if (next !== pendingSelectIdRef.current) {
-            return; // ignore flicker event
-          }
-          pendingSelectIdRef.current = null;
-        }
-        if (next !== currentId) {
-          setCurrentId(next);
-          if (next) await writeLastConversationId(next);
-        }
-      }}
+      onSelectionChange={selectConversation}
       actions={
         <ActionPanel>
           <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
@@ -426,7 +302,7 @@ export default function Command() {
                 onAction={() => abortRef.current?.abort()}
                 shortcut={{ modifiers: ["cmd"], key: "." }}
               />
-              <Action title="Open" onAction={() => setCurrentId(c.id)} />
+              <Action title="Open" onAction={() => selectConversation(c.id)} />
               <Action.CopyToClipboard title="Copy Conversation" content={conversationToMarkdown(c)} />
             </ActionPanel>
           }

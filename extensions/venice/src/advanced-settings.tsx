@@ -2,6 +2,8 @@ import { ActionPanel, Action, Form, showToast, Toast, LocalStorage } from "@rayc
 import { useEffect, useState } from "react";
 
 import { DEFAULT_MODEL_SETTINGS, STORAGE_KEYS } from "./constants";
+import { handleError } from "./utils/errors";
+import { validateModelSettings } from "./utils/validation";
 
 import type { ModelSettings, VeniceModel } from "./types";
 
@@ -37,51 +39,14 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     setTemperatureInput(settings.temperature.toString());
   }, [settings.temperature]);
 
-  function validateSettings(): string | null {
-    // Validate temperature
-    if (settings.temperature !== undefined) {
-      if (
-        typeof settings.temperature !== "number" ||
-        isNaN(settings.temperature) ||
-        settings.temperature < 0 ||
-        settings.temperature > 2
-      ) {
-        return "Temperature must be a number between 0.0 and 2.0";
-      }
-    }
-
-    // Validate topP
-    if (settings.topP !== undefined) {
-      if (typeof settings.topP !== "number" || isNaN(settings.topP) || settings.topP < 0 || settings.topP > 1) {
-        return "Top P must be a number between 0.0 and 1.0";
-      }
-    }
-
-    // Validate topK
-    if (settings.topK !== undefined) {
-      if (!Number.isInteger(settings.topK) || settings.topK < 1) {
-        return "Top K must be an integer greater than 0";
-      }
-    }
-
-    // Validate maxTokens
-    if (settings.maxTokens !== undefined) {
-      if (!Number.isInteger(settings.maxTokens) || settings.maxTokens < 1) {
-        return "Max Tokens must be an integer greater than 0";
-      }
-    }
-
-    return null; // No validation errors
-  }
-
   async function saveSettings() {
     // Validate settings before saving
-    const validationError = validateSettings();
-    if (validationError) {
+    const validationResult = validateModelSettings(settings);
+    if (!validationResult.isValid) {
       await showToast({
         style: Toast.Style.Failure,
         title: "Invalid settings",
-        message: validationError,
+        message: validationResult.error || "Unknown validation error",
       });
       return;
     }
@@ -95,11 +60,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
       });
       onRefresh?.();
     } catch (error) {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Failed to save settings",
-        message: String(error),
-      });
+      await handleError(error, "Save settings");
     }
   }
 
@@ -115,11 +76,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
       });
       onRefresh?.();
     } catch (error) {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Failed to reset settings",
-        message: String(error),
-      });
+      await handleError(error, "Reset settings");
     }
   }
 
