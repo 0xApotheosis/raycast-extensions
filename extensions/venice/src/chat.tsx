@@ -19,7 +19,7 @@ export default function Command() {
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
   const { conversations, currentId, save, resolvePreferredModelId, selectConversation, pendingSelectIdRef } =
     useConversationManager();
-  const { stream, isStreaming, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming } =
+  const { stream, isStreaming, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming, isPending } =
     useChatStreaming();
 
   const [searchText, setSearchText] = useState("");
@@ -206,7 +206,7 @@ export default function Command() {
 
   return (
     <List
-      isLoading={isStreaming}
+      isLoading={isStreaming || isPending}
       isShowingDetail
       searchBarPlaceholder="Ask a question privately... (Press Enter to send)"
       selectedItemId={currentId}

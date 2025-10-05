@@ -98,13 +98,18 @@ export class VeniceClient {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split(/\n/);
         buffer = lines.pop() ?? ""; // leftover
+        
+        // Process multiple chunks in a batch to reduce overhead
+        const chunks: string[] = [];
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith("data:")) continue;
@@ -112,6 +117,11 @@ export class VeniceClient {
           if (!payload || payload === "[DONE]") {
             continue;
           }
+          chunks.push(payload);
+        }
+        
+        // Batch process chunks to reduce function call overhead
+        for (const payload of chunks) {
           try {
             const json = JSON.parse(payload) as {
               choices?: Array<{ delta?: { content?: string } }>;

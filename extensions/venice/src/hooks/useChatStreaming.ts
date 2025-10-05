@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
 import { VeniceClient } from "../api/client";
 import { UI_CONSTANTS } from "../constants";
@@ -15,21 +15,62 @@ export function useChatStreaming() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [caretOn, setCaretOn] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const [isPending, startTransition] = useTransition();
+  
+  // Batch streaming updates to reduce re-renders
+  const streamBufferRef = useRef("");
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Blink caret while streaming
+  // Debounced stream update function
+  const updateStream = useCallback(() => {
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
+    
+    updateTimeoutRef.current = setTimeout(() => {
+      startTransition(() => {
+        setStream(streamBufferRef.current);
+      });
+    }, 16); // ~60fps update rate
+  }, []);
+
+  // Blink caret while streaming (debounced)
   useEffect(() => {
     if (!isStreaming) {
       setCaretOn(false);
       return;
     }
-    const id = setInterval(() => setCaretOn((v) => !v), UI_CONSTANTS.CARET_BLINK_INTERVAL_MS);
+    
+    // Debounce caret updates to reduce CPU usage
+    const id = setInterval(() => {
+      startTransition(() => {
+        setCaretOn((v) => !v);
+      });
+    }, UI_CONSTANTS.CARET_BLINK_INTERVAL_MS);
+    
     return () => clearInterval(id);
   }, [isStreaming]);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
+  }, []);
 
   /**
    * Resets the streaming state.
    */
   const resetStream = useCallback(() => {
+    // Clear any pending updates
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = null;
+    }
+    
+    streamBufferRef.current = "";
     setStream("");
     setIsStreaming(false);
   }, []);
@@ -38,6 +79,13 @@ export function useChatStreaming() {
    * Starts a new streaming session.
    */
   const startStreaming = useCallback(() => {
+    // Clear any pending updates
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = null;
+    }
+    
+    streamBufferRef.current = "";
     setStream("");
     setIsStreaming(true);
     abortRef.current?.abort();
@@ -103,7 +151,8 @@ export function useChatStreaming() {
         onChunk: (c) => {
           if (c.type === "text" && c.data) {
             assistantText += c.data;
-            setStream((prev) => prev + c.data);
+            streamBufferRef.current += c.data;
+            updateStream(); // Batched update
           }
         },
         signal: abortRef.current?.signal,
@@ -135,7 +184,7 @@ export function useChatStreaming() {
       onError(error);
       throw error;
     }
-  }, [startStreaming, resetStream]);
+  }, [startStreaming, resetStream, updateStream]);
 
   /**
    * Auto-generates a conversation title using the AI
@@ -203,5 +252,6 @@ export function useChatStreaming() {
     sendMessage,
     generateTitle,
     cancelStreaming,
+    isPending, // Expose transition state for UI optimization
   };
 }
