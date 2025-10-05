@@ -99,3 +99,123 @@ export const validateModelSettings = (settings: ModelSettings): ValidationResult
 
   return { isValid: true };
 };
+
+/**
+ * Validates a string input for numeric values with bounds
+ */
+export const validateNumericInput = (
+  value: string,
+  min: number,
+  max: number,
+  fieldName: string,
+  allowEmpty = false
+): ValidationResult => {
+  if (allowEmpty && value.trim() === "") {
+    return { isValid: true };
+  }
+  
+  const parsed = parseFloat(value);
+  if (isNaN(parsed) || !isFinite(parsed)) {
+    return { isValid: false, error: `${fieldName} must be a valid number` };
+  }
+  
+  if (parsed < min || parsed > max) {
+    return { isValid: false, error: `${fieldName} must be between ${min} and ${max}` };
+  }
+  
+  return { isValid: true };
+};
+
+/**
+ * Validates a string input for integer values with bounds
+ */
+export const validateIntegerInput = (
+  value: string,
+  min: number,
+  max: number,
+  fieldName: string,
+  allowEmpty = false
+): ValidationResult => {
+  if (allowEmpty && value.trim() === "") {
+    return { isValid: true };
+  }
+  
+  const parsed = parseInt(value);
+  if (isNaN(parsed) || !Number.isInteger(parsed)) {
+    return { isValid: false, error: `${fieldName} must be a valid integer` };
+  }
+  
+  if (parsed < min || parsed > max) {
+    return { isValid: false, error: `${fieldName} must be between ${min} and ${max}` };
+  }
+  
+  return { isValid: true };
+};
+
+/**
+ * Validation service class for centralized validation logic
+ */
+export class ValidationService {
+  /**
+   * Validates model settings with detailed error reporting
+   */
+  static validateModelSettings(settings: ModelSettings): ValidationResult {
+    return validateModelSettings(settings);
+  }
+
+  /**
+   * Validates temperature input from form
+   */
+  static validateTemperatureInput(value: string): ValidationResult {
+    return validateNumericInput(value, 0, 2, "Temperature");
+  }
+
+  /**
+   * Validates top_p input from form
+   */
+  static validateTopPInput(value: string): ValidationResult {
+    return validateNumericInput(value, 0, 1, "Top P", true);
+  }
+
+  /**
+   * Validates top_k input from form
+   */
+  static validateTopKInput(value: string): ValidationResult {
+    return validateIntegerInput(value, 1, 100, "Top K", true);
+  }
+
+  /**
+   * Validates max_tokens input from form
+   */
+  static validateMaxTokensInput(value: string): ValidationResult {
+    return validateIntegerInput(value, 1, Number.MAX_SAFE_INTEGER, "Max Tokens", true);
+  }
+
+  /**
+   * Validates conversation title
+   */
+  static validateConversationTitle(title: string): ValidationResult {
+    const trimmed = title.trim();
+    if (trimmed.length === 0) {
+      return { isValid: false, error: "Title cannot be empty" };
+    }
+    if (trimmed.length > 200) {
+      return { isValid: false, error: "Title must be 200 characters or less" };
+    }
+    return { isValid: true };
+  }
+
+  /**
+   * Validates message content
+   */
+  static validateMessageContent(content: string): ValidationResult {
+    const trimmed = content.trim();
+    if (trimmed.length === 0) {
+      return { isValid: false, error: "Message cannot be empty" };
+    }
+    if (trimmed.length > 100000) {
+      return { isValid: false, error: "Message must be 100,000 characters or less" };
+    }
+    return { isValid: true };
+  }
+}

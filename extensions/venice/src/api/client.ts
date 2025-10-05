@@ -10,12 +10,23 @@ export class VeniceClient {
   private apiKey: string | undefined;
   private baseUrl: string;
   private proxyMode: boolean;
+  private static instance: VeniceClient | null = null;
 
   constructor() {
     getPreferenceValues<Preferences>();
     this.apiKey = undefined; // Always use proxy
     this.baseUrl = "https://venice.anteambulo.dev/api/v1";
     this.proxyMode = true;
+  }
+
+  /**
+   * Get the singleton instance of VeniceClient
+   */
+  static getInstance(): VeniceClient {
+    if (!VeniceClient.instance) {
+      VeniceClient.instance = new VeniceClient();
+    }
+    return VeniceClient.instance;
   }
 
   async listModels(
@@ -35,6 +46,10 @@ export class VeniceClient {
         model_spec?: { name?: string; availableContextTokens?: number; traits?: string[] };
       }>;
     };
+    
+    if (!Array.isArray(payload.data)) {
+      throw new Error("Invalid response format: expected data array");
+    }
     const mapTypeToCaps = (t: string): VeniceCapability[] => {
       if (t === "text") return ["chat"];
       if (t === "image" || t === "upscale" || t === "inpaint") return ["image"];
@@ -105,8 +120,9 @@ export class VeniceClient {
             if (typeof delta === "string" && delta.length > 0) {
               args.onChunk({ type: "text", data: delta });
             }
-          } catch {
-            // ignore malformed lines
+          } catch (error) {
+            // Log malformed lines for debugging but don't break the stream
+            console.warn("Malformed streaming chunk:", payload, error);
           }
         }
       }
@@ -186,6 +202,10 @@ export class VeniceClient {
     const json = (await resp.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    return json.choices?.[0]?.message?.content ?? "";
+    const content = json.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      throw new Error("Invalid response format: missing content");
+    }
+    return content;
   }
 }

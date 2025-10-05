@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useReducer, useCallback } from "react";
 
 import { STORAGE_KEYS } from "../constants";
 import {
@@ -14,13 +14,66 @@ import { getStoredString } from "../utils/storage";
 import type { VeniceModel } from "../types";
 
 /**
+ * Conversation state management actions
+ */
+type ConversationAction =
+  | { type: "SET_CONVERSATIONS"; payload: Conversation[] }
+  | { type: "SET_CURRENT_ID"; payload: string | undefined }
+  | { type: "ADD_CONVERSATION"; payload: Conversation }
+  | { type: "UPDATE_CONVERSATION"; payload: Conversation }
+  | { type: "DELETE_CONVERSATION"; payload: string }
+  | { type: "SET_INITIALIZING"; payload: boolean };
+
+/**
+ * Conversation state interface
+ */
+interface ConversationState {
+  conversations: Conversation[];
+  currentId: string | undefined;
+  isInitializing: boolean;
+}
+
+/**
+ * Conversation reducer function
+ */
+function conversationReducer(state: ConversationState, action: ConversationAction): ConversationState {
+  switch (action.type) {
+    case "SET_CONVERSATIONS":
+      return { ...state, conversations: action.payload };
+    case "SET_CURRENT_ID":
+      return { ...state, currentId: action.payload };
+    case "ADD_CONVERSATION":
+      return { ...state, conversations: [action.payload, ...state.conversations] };
+    case "UPDATE_CONVERSATION":
+      return {
+        ...state,
+        conversations: state.conversations.map((c) =>
+          c.id === action.payload.id ? action.payload : c
+        ),
+      };
+    case "DELETE_CONVERSATION":
+      return {
+        ...state,
+        conversations: state.conversations.filter((c) => c.id !== action.payload),
+        currentId: state.currentId === action.payload ? undefined : state.currentId,
+      };
+    case "SET_INITIALIZING":
+      return { ...state, isInitializing: action.payload };
+    default:
+      return state;
+  }
+}
+
+/**
  * Hook to manage conversations state and operations.
  * Handles loading, saving, creating, and selecting conversations.
  */
 export function useConversationManager() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [currentId, setCurrentId] = useState<string | undefined>(undefined);
-  const isInitializingRef = useRef<boolean>(true);
+  const [state, dispatch] = useReducer(conversationReducer, {
+    conversations: [],
+    currentId: undefined,
+    isInitializing: true,
+  });
   const pendingSelectIdRef = useRef<string | null>(null);
 
   // Load conversations on mount and reconcile selection from persistent storage
@@ -31,14 +84,14 @@ export function useConversationManager() {
         const lastId = await loadLastConversationIdFromStorage();
         if (stored && stored.length > 0) {
           const sorted = sortConversationsByDate(stored);
-          setConversations(sorted);
+          dispatch({ type: "SET_CONVERSATIONS", payload: sorted });
           const exists = lastId && sorted.some((c) => c.id === lastId);
-          setCurrentId(exists ? lastId : sorted[0]?.id);
+          dispatch({ type: "SET_CURRENT_ID", payload: exists ? lastId : sorted[0]?.id });
         }
       } catch {
         // ignore parse errors
       } finally {
-        isInitializingRef.current = false;
+        dispatch({ type: "SET_INITIALIZING", payload: false });
       }
     })();
   }, []);
@@ -46,12 +99,12 @@ export function useConversationManager() {
   /**
    * Saves conversations to storage and updates state.
    */
-  const save = async (updated: Conversation[]): Promise<Conversation[]> => {
+  const save = useCallback(async (updated: Conversation[]): Promise<Conversation[]> => {
     const sorted = sortConversationsByDate(updated);
-    setConversations(sorted);
+    dispatch({ type: "SET_CONVERSATIONS", payload: sorted });
     await writeConversationsStorage(sorted);
     return sorted;
-  };
+  }, []);
 
   /**
    * Determines the preferred model id for new chats.
@@ -82,8 +135,8 @@ export function useConversationManager() {
   /**
    * Updates the current conversation selection.
    */
-  const selectConversation = async (id: string | undefined) => {
-    if (isInitializingRef.current) {
+  const selectConversation = useCallback(async (id: string | undefined) => {
+    if (state.isInitializing) {
       return; // ignore selection changes during initial load to prevent flicker
     }
     const next = id ?? undefined;
@@ -94,20 +147,20 @@ export function useConversationManager() {
       }
       pendingSelectIdRef.current = null;
     }
-    if (next !== currentId) {
-      setCurrentId(next);
+    if (next !== state.currentId) {
+      dispatch({ type: "SET_CURRENT_ID", payload: next });
       if (next) await writeLastConversationId(next);
     }
-  };
+  }, [state.isInitializing, state.currentId]);
 
   return {
-    conversations,
-    currentId,
-    setCurrentId,
+    conversations: state.conversations,
+    currentId: state.currentId,
+    setCurrentId: (id: string | undefined) => dispatch({ type: "SET_CURRENT_ID", payload: id }),
     save,
     resolvePreferredModelId,
     selectConversation,
-    isInitializingRef,
+    isInitializingRef: { current: state.isInitializing },
     pendingSelectIdRef,
   };
 }

@@ -1,13 +1,13 @@
 import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 
-import { VeniceClient } from "./api/client";
 import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
 import { useChatModel } from "./hooks/useChatModel";
+import { useChatStreaming } from "./hooks/useChatStreaming";
 import { useConversationManager } from "./hooks/useConversationManager";
 import { useDefaultModel } from "./hooks/useDefaultModel";
-import { useStreamingChat } from "./hooks/useStreamingChat";
 import { type Conversation } from "./storage/conversations";
+import { formatRelativeTime } from "./utils/date";
 import { handleError } from "./utils/errors";
 import { conversationToMarkdown } from "./utils/markdown";
 import { getModelSettings, hasCustomModelSettings } from "./utils/models";
@@ -19,8 +19,8 @@ export default function Command() {
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
   const { conversations, currentId, save, resolvePreferredModelId, selectConversation, pendingSelectIdRef } =
     useConversationManager();
-  const { stream, setStream, isStreaming, setIsStreaming, caretOn, abortRef, startStreaming, resetStream } =
-    useStreamingChat();
+  const { stream, isStreaming, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming } =
+    useChatStreaming();
 
   const [searchText, setSearchText] = useState("");
   const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
@@ -36,12 +36,25 @@ export default function Command() {
     (async () => {
       const settings: Record<string, ModelSettings> = {};
       const customModels = new Set<string>();
-      for (const model of models) {
-        settings[model.id] = await getModelSettings(model.id);
-        if (await hasCustomModelSettings(model.id)) {
-          customModels.add(model.id);
+      
+      // Batch load all settings in parallel
+      const settingsPromises = models.map(async (model) => {
+        const [modelSettings, hasCustom] = await Promise.all([
+          getModelSettings(model.id),
+          hasCustomModelSettings(model.id)
+        ]);
+        return { modelId: model.id, settings: modelSettings, hasCustom };
+      });
+      
+      const results = await Promise.all(settingsPromises);
+      
+      results.forEach(({ modelId, settings: modelSettings, hasCustom }) => {
+        settings[modelId] = modelSettings;
+        if (hasCustom) {
+          customModels.add(modelId);
         }
-      }
+      });
+      
       setModelSettings(settings);
       setCustomSettingsModels(customModels);
     })();
@@ -58,14 +71,14 @@ export default function Command() {
     return models?.find((m) => m.id === targetModelId) || models?.[0] || undefined;
   }, [models, currentConversation?.modelId, currentModelId]);
 
-  async function onModelChange(modelId: string) {
+  const onModelChange = useCallback(async (modelId: string) => {
     setCurrentModelId(modelId);
     await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, modelId);
     if (currentConversation) {
       const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
       await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
     }
-  }
+  }, [currentConversation, conversations, save, setCurrentModelId]);
 
   const currentMarkdown = useMemo(() => {
     if (!currentConversation) return "";
@@ -80,7 +93,7 @@ export default function Command() {
     return parts.join("\n\n---\n\n");
   }, [currentConversation, stream, isStreaming, caretOn]);
 
-  async function ensureConversation(): Promise<{ conv: Conversation; list: Conversation[] }> {
+  const ensureConversation = useCallback(async (): Promise<{ conv: Conversation; list: Conversation[] }> => {
     if (currentConversation) return { conv: currentConversation, list: conversations };
     const preferredModelId = await resolvePreferredModelId(currentModelId, models, model);
     const conv: Conversation = {
@@ -99,106 +112,57 @@ export default function Command() {
       setCurrentModelId(preferredModelId);
     }
     return { conv, list: updatedList };
-  }
+  }, [currentConversation, conversations, resolvePreferredModelId, currentModelId, models, model, save, selectConversation, setCurrentModelId]);
 
-  async function onSend() {
+  const onSend = useCallback(async () => {
     const content = searchText.trim();
     if (!content || !currentModel) return;
-    startStreaming();
+    
     const { conv, list } = await ensureConversation();
-    const now = Date.now();
-    const withUser: Conversation = {
-      ...conv,
-      messages: [...conv.messages, { id: `${now}-u`, conversationId: conv.id, role: "user", content, createdAt: now }],
-      updatedAt: now,
-      modelId: currentModel.id,
-    };
-    const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
-    const updatedConversations = await save(base.map((c) => (c.id === conv.id ? withUser : c)));
-    setSearchText("");
-
-    const client = new VeniceClient();
-    let assistantText = "";
+    const settings = modelSettings[currentModel.id] || ({} as ModelSettings);
+    
     try {
-      const settings = modelSettings[currentModel.id] || ({} as ModelSettings);
-      await client.streamChat({
-        model: currentModel.id,
-        messages: withUser.messages.map((m) => ({ role: m.role, content: m.content })),
-        settings: {
-          temperature: settings.temperature,
-          top_p: settings.topP,
-          top_k: settings.topK,
-          max_tokens: settings.maxTokens,
+      await sendMessage({
+        conversation: conv,
+        message: content,
+        model: currentModel,
+        settings,
+        onUpdate: async (updatedConv) => {
+          const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
+          await save(base.map((c) => (c.id === conv.id ? updatedConv : c)));
         },
-        onChunk: (c) => {
-          if (c.type === "text" && c.data) {
-            assistantText += c.data;
-            setStream((prev) => prev + c.data);
+        onComplete: async (completedConv) => {
+          const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
+          const finalConversations = await save(base.map((c) => (c.id === conv.id ? completedConv : c)));
+          
+          // Auto-name after first assistant reply
+          if (completedConv.messages.length >= 2 && completedConv.title === UI_CONSTANTS.NEW_CHAT_TITLE && currentModel) {
+            try {
+              const title = await generateTitle({
+                conversation: completedConv,
+                model: currentModel,
+                settings,
+              });
+              const titled: Conversation = {
+                ...completedConv,
+                title,
+              };
+              await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
+            } catch (e) {
+              await handleError(e, "Chat naming");
+            }
           }
         },
-        signal: abortRef.current.signal,
+        onError: async (error) => {
+          await handleError(error, "Chat");
+        },
       });
-      const doneAt = Date.now();
-      const withAssistant: Conversation = {
-        ...withUser,
-        messages: [
-          ...withUser.messages,
-          {
-            id: `${doneAt}-a`,
-            conversationId: withUser.id,
-            role: "assistant",
-            content: assistantText,
-            createdAt: doneAt,
-          },
-        ],
-        updatedAt: doneAt,
-      };
-      resetStream();
-      const finalConversations = await save(updatedConversations.map((c) => (c.id === conv.id ? withAssistant : c)));
-
-      // Auto-name after first assistant reply
-      if (withAssistant.messages.length >= 2 && withAssistant.title === UI_CONSTANTS.NEW_CHAT_TITLE && currentModel) {
-        try {
-          const client2 = new VeniceClient();
-          const summarySettings = modelSettings[currentModel.id] || ({} as ModelSettings);
-          const summary = await client2.completeChat({
-            model: currentModel.id,
-            messages: [
-              { role: "system", content: UI_CONSTANTS.AUTO_NAME_SYSTEM_PROMPT },
-              {
-                role: "user",
-                content: withAssistant.messages
-                  .map((m) => `${m.role}: ${m.content}`)
-                  .join("\n\n")
-                  .slice(0, UI_CONSTANTS.AUTO_NAME_PROMPT_MAX_LENGTH),
-              },
-            ],
-            settings: {
-              max_tokens: UI_CONSTANTS.AUTO_NAME_MAX_TOKENS,
-              temperature: UI_CONSTANTS.AUTO_NAME_TEMPERATURE,
-              ...(summarySettings.topP !== undefined && { top_p: summarySettings.topP }),
-              ...(summarySettings.topK !== undefined && { top_k: summarySettings.topK }),
-              ...(summarySettings.maxTokens !== undefined && { max_tokens: summarySettings.maxTokens }),
-            },
-            veniceParameters: {
-              disable_thinking: true,
-            },
-          });
-          const titled: Conversation = {
-            ...withAssistant,
-            title: summary.trim().replace(/\n/g, " ") || UI_CONSTANTS.NEW_CHAT_TITLE,
-          };
-          await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
-        } catch (e) {
-          await handleError(e, "Chat naming");
-        }
-      }
-    } catch (e) {
-      await handleError(e, "Chat");
-    } finally {
-      setIsStreaming(false);
+      
+      setSearchText("");
+    } catch (error) {
+      await handleError(error, "Chat");
     }
-  }
+  }, [searchText, currentModel, save, modelSettings, sendMessage, generateTitle, ensureConversation]);
 
   async function onNewChat() {
     const id = `${Date.now()}`;
@@ -261,7 +225,7 @@ export default function Command() {
           ))}
         </List.Dropdown>
       }
-      onSelectionChange={selectConversation}
+      onSelectionChange={(id) => selectConversation(id || undefined)}
       actions={
         <ActionPanel>
           <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
@@ -275,7 +239,7 @@ export default function Command() {
           <Action
             title="Cancel Streaming"
             icon={Icon.Stop}
-            onAction={() => abortRef.current?.abort()}
+            onAction={cancelStreaming}
             shortcut={{ modifiers: ["cmd"], key: "." }}
           />
         </ActionPanel>
@@ -288,7 +252,7 @@ export default function Command() {
           title={c.title}
           accessories={[
             ...(c.id === currentId && isStreaming ? [{ text: "Typing…" as const }] : []),
-            { date: new Date(c.updatedAt) },
+            { text: formatRelativeTime(c.updatedAt) },
           ]}
           detail={<List.Item.Detail markdown={c.id === currentId ? currentMarkdown : undefined} />}
           actions={
@@ -299,7 +263,7 @@ export default function Command() {
               <Action
                 title="Cancel Streaming"
                 icon={Icon.Stop}
-                onAction={() => abortRef.current?.abort()}
+                onAction={cancelStreaming}
                 shortcut={{ modifiers: ["cmd"], key: "." }}
               />
               <Action title="Open" onAction={() => selectConversation(c.id)} />

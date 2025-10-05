@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import { DEFAULT_MODEL_SETTINGS, STORAGE_KEYS } from "./constants";
 import { handleError } from "./utils/errors";
-import { validateModelSettings } from "./utils/validation";
+import { ValidationService } from "./utils/validation";
 
 import type { ModelSettings, VeniceModel } from "./types";
 
@@ -41,7 +41,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
 
   async function saveSettings() {
     // Validate settings before saving
-    const validationResult = validateModelSettings(settings);
+    const validationResult = ValidationService.validateModelSettings(settings);
     if (!validationResult.isValid) {
       await showToast({
         style: Toast.Style.Failure,
@@ -103,8 +103,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
 
           // Only update settings if we have a valid complete number within bounds
           if (value.trim() !== "") {
-            const parsed = parseFloat(value);
-            if (!isNaN(parsed) && isFinite(parsed) && value === parsed.toString() && parsed >= 0 && parsed <= 2) {
+            const validation = ValidationService.validateTemperatureInput(value);
+            if (validation.isValid) {
+              const parsed = parseFloat(value);
               setSettings((prev) => ({ ...prev, temperature: parsed }));
             }
           }
@@ -121,8 +122,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
           if (value.trim() === "") {
             setSettings((prev) => ({ ...prev, topP: undefined }));
           } else {
-            const parsed = parseFloat(value);
-            if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) {
+            const validation = ValidationService.validateTopPInput(value);
+            if (validation.isValid) {
+              const parsed = parseFloat(value);
               setSettings((prev) => ({ ...prev, topP: parsed }));
             }
           }
@@ -139,8 +141,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
           if (value.trim() === "") {
             setSettings((prev) => ({ ...prev, topK: undefined }));
           } else {
-            const parsed = parseInt(value);
-            if (!isNaN(parsed) && parsed >= 1) {
+            const validation = ValidationService.validateTopKInput(value);
+            if (validation.isValid) {
+              const parsed = parseInt(value);
               setSettings((prev) => ({ ...prev, topK: parsed }));
             }
           }
@@ -157,8 +160,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
           if (value.trim() === "") {
             setSettings((prev) => ({ ...prev, maxTokens: undefined }));
           } else {
-            const parsed = parseInt(value);
-            if (!isNaN(parsed) && parsed >= 1) {
+            const validation = ValidationService.validateMaxTokensInput(value);
+            if (validation.isValid) {
+              const parsed = parseInt(value);
               setSettings((prev) => ({ ...prev, maxTokens: parsed }));
             }
           }

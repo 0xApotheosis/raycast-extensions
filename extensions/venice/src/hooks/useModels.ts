@@ -29,7 +29,7 @@ export function useModels() {
       if (cached && Date.now() - cached.ts < UI_CONSTANTS.MODELS_CACHE_TTL_MS) {
         return cached.models;
       }
-      const client = new VeniceClient();
+      const client = VeniceClient.getInstance();
       const models = await client.listModels();
       writeCache(models);
       return models;

@@ -18,6 +18,7 @@ import {
   writeLastConversationId,
   type Conversation,
 } from "./storage/conversations";
+import { formatRelativeTime } from "./utils/date";
 import { conversationToMarkdown } from "./utils/markdown";
 import { sortConversationsByDate } from "./utils/sorting";
 
@@ -78,7 +79,7 @@ export default function Command() {
           key={c.id}
           id={c.id}
           title={c.title}
-          accessories={[{ date: new Date(c.updatedAt) }]}
+          accessories={[{ text: formatRelativeTime(c.updatedAt) }]}
           detail={<List.Item.Detail markdown={conversationToMarkdown(c)} />}
           actions={
             <ActionPanel>
