@@ -17,7 +17,7 @@ import type { VeniceModel, ModelSettings } from "./types";
 export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
-  const { conversations, currentId, save, resolvePreferredModelId, selectConversation, pendingSelectIdRef } =
+  const { conversations, currentId, setCurrentId, save, resolvePreferredModelId, selectConversation, pendingSelectIdRef } =
     useConversationManager();
   const { stream, isStreaming, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming, isPending } =
     useChatStreaming();
@@ -60,9 +60,12 @@ export default function Command() {
     })();
   }, [models]);
 
+  // Use pending selection if set for immediate UI feedback during transitions
+  const effectiveCurrentId = pendingSelectIdRef.current ?? currentId;
+  
   const currentConversation: Conversation | undefined = useMemo(
-    () => conversations.find((c) => c.id === currentId),
-    [conversations, currentId],
+    () => conversations.find((c) => c.id === effectiveCurrentId),
+    [conversations, effectiveCurrentId],
   );
 
   const currentModel: VeniceModel | undefined = useMemo(() => {
@@ -196,12 +199,26 @@ export default function Command() {
       primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
     });
     if (!ok) return;
+    
+    // Find the index of the conversation being deleted
+    const deletedIndex = conversations.findIndex((c) => c.id === targetId);
     const next = conversations.filter((c) => c.id !== targetId);
+    
+    // Select the conversation at the same index, or the previous one if we deleted the last
+    const nextIndex = Math.min(deletedIndex, next.length - 1);
+    const nextId = next[nextIndex]?.id;
+    
+    // Update currentId synchronously BEFORE updating conversations to prevent List flicker
+    // This ensures selectedItemId always points to a valid item during the transition
+    setCurrentId(nextId);
+    pendingSelectIdRef.current = nextId ?? null;
+    
+    // Now update conversations - List will see the new selection is already set
     await save(next);
-    if (currentId === targetId) {
-      await selectConversation(next[0]?.id);
-      resetStream();
-    }
+    
+    // Persist the selection and reset stream
+    await selectConversation(nextId);
+    resetStream();
   }
 
   return (
@@ -209,7 +226,7 @@ export default function Command() {
       isLoading={isStreaming || isPending}
       isShowingDetail
       searchBarPlaceholder="Ask a question privately... (Press Enter to send)"
-      selectedItemId={currentId}
+      selectedItemId={effectiveCurrentId}
       filtering={false}
       searchText={searchText}
       onSearchTextChange={setSearchText}
@@ -251,10 +268,10 @@ export default function Command() {
           key={c.id}
           title={c.title}
           accessories={[
-            ...(c.id === currentId && isStreaming ? [{ text: "Typing…" as const }] : []),
+            ...(c.id === effectiveCurrentId && isStreaming ? [{ text: "Typing…" as const }] : []),
             { text: formatRelativeTime(c.updatedAt) },
           ]}
-          detail={<List.Item.Detail markdown={c.id === currentId ? currentMarkdown : undefined} />}
+          detail={<List.Item.Detail markdown={c.id === effectiveCurrentId ? currentMarkdown : undefined} />}
           actions={
             <ActionPanel>
               <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />

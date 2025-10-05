@@ -84,14 +84,23 @@ export function useConversationManager() {
         const lastId = await loadLastConversationIdFromStorage();
         if (stored && stored.length > 0) {
           const sorted = sortConversationsByDate(stored);
-          dispatch({ type: "SET_CONVERSATIONS", payload: sorted });
           const exists = lastId && sorted.some((c) => c.id === lastId);
-          dispatch({ type: "SET_CURRENT_ID", payload: exists ? lastId : sorted[0]?.id });
+          const initialId = exists ? lastId : sorted[0]?.id;
+          
+          // Set pending selection to prevent List from triggering spurious changes during init
+          pendingSelectIdRef.current = initialId ?? null;
+          
+          dispatch({ type: "SET_CONVERSATIONS", payload: sorted });
+          dispatch({ type: "SET_CURRENT_ID", payload: initialId });
         }
       } catch {
         // ignore parse errors
       } finally {
         dispatch({ type: "SET_INITIALIZING", payload: false });
+        // Clear pending ref after a brief delay to allow the List to stabilize
+        setTimeout(() => {
+          pendingSelectIdRef.current = null;
+        }, 150);
       }
     })();
   }, []);
@@ -140,10 +149,10 @@ export function useConversationManager() {
       return; // ignore selection changes during initial load to prevent flicker
     }
     const next = id ?? undefined;
-    // Suppress transient selection changes when we just created a chat
-    if (pendingSelectIdRef.current) {
+    // Suppress transient selection changes when we have a pending selection
+    if (pendingSelectIdRef.current !== null) {
       if (next !== pendingSelectIdRef.current) {
-        return; // ignore flicker event
+        return; // ignore flicker event - we're waiting for a specific selection
       }
       pendingSelectIdRef.current = null;
     }
