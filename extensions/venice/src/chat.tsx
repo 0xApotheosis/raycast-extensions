@@ -121,6 +121,9 @@ export default function Command() {
     const content = searchText.trim();
     if (!content || !currentModel) return;
     
+    // Clear input immediately for better UX
+    setSearchText("");
+
     const { conv, list } = await ensureConversation();
     const settings = modelSettings[currentModel.id] || ({} as ModelSettings);
     
@@ -160,8 +163,6 @@ export default function Command() {
           await handleError(error, "Chat");
         },
       });
-      
-      setSearchText("");
     } catch (error) {
       await handleError(error, "Chat");
     }
