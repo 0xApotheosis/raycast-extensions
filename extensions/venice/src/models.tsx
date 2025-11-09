@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Icon, List, Color, showToast, Toast, LocalStorage } from "@raycast/api";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 
 import AdvancedSettingsForm from "./advanced-settings";
 import { STORAGE_KEYS } from "./constants";
@@ -65,6 +65,16 @@ export default function Command() {
     }
   }, [error]);
 
+  const customSettingsHandlers = useMemo(() => {
+    const handlers = new Map<string, (hasCustom: boolean) => void>();
+    filtered?.forEach((m) => {
+      handlers.set(m.id, (hasCustom: boolean) => {
+        setCustomSettingsMap((prev) => ({ ...prev, [m.id]: hasCustom }));
+      });
+    });
+    return handlers;
+  }, [filtered]);
+
   return (
     <List
       isLoading={isLoading}
@@ -73,30 +83,30 @@ export default function Command() {
       filtering
       throttle
     >
-      {filtered?.map((m) => (
-        <ModelItem
-          key={m.id}
-          model={m}
-          onRefresh={mutate}
-          defaultModelId={defaultModelId}
-          setDefaultModelId={setDefaultModelId}
-          hasCustomSettings={customSettingsMap[m.id] || false}
-          onCustomSettingsChange={(hasCustom) => {
-            setCustomSettingsMap((prev) => ({ ...prev, [m.id]: hasCustom }));
-          }}
-        />
-      ))}
+      {filtered?.map((m) => {
+        const handler = customSettingsHandlers.get(m.id);
+        if (!handler) return null;
+        return (
+          <ModelItem
+            key={m.id}
+            model={m}
+            onRefresh={mutate}
+            defaultModelId={defaultModelId}
+            setDefaultModelId={setDefaultModelId}
+            hasCustomSettings={customSettingsMap[m.id] || false}
+            onCustomSettingsChange={handler}
+          />
+        );
+      })}
     </List>
   );
 }
 
 function CapabilityDropdown(props: { value: CapabilityFilter; onChange: (v: CapabilityFilter) => void }) {
+  const handleChange = useCallback((v: string) => props.onChange(v as CapabilityFilter), [props]);
+
   return (
-    <List.Dropdown
-      tooltip="Filter by capability"
-      value={props.value}
-      onChange={(v) => props.onChange(v as CapabilityFilter)}
-    >
+    <List.Dropdown tooltip="Filter by capability" value={props.value} onChange={handleChange}>
       <List.Dropdown.Item title="All" value="all" />
       <List.Dropdown.Item title="Chat" value="chat" />
       <List.Dropdown.Item title="Image" value="image" />
@@ -130,16 +140,31 @@ function ModelItem({
   accessories.push({ tag: { value: model.capabilities.join(", "), color: Color.Blue } });
   if (model.contextWindow) accessories.push({ text: `${model.contextWindow} tokens` });
 
-  const handleSetAsDefault = async () => {
+  const handleSetAsDefault = useCallback(async () => {
     try {
       await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, model.id);
-      setDefaultModelId(model.id); // Update state immediately - this will be shared across all ModelItems
+      setDefaultModelId(model.id);
       await showToast({ style: Toast.Style.Success, title: `${model.name || model.id} set as default` });
-      onRefresh(); // Refresh the models list
+      onRefresh();
     } catch (e) {
       await handleError(e, "Set default model");
     }
-  };
+  }, [model.id, model.name, setDefaultModelId, onRefresh]);
+
+  const handleSettingsRefresh = useCallback(() => {
+    onRefresh();
+    import("./utils/models")
+      .then(({ hasCustomModelSettings }) => {
+        hasCustomModelSettings(model.id)
+          .then(onCustomSettingsChange)
+          .catch(() => {
+            // Ignore errors checking custom settings
+          });
+      })
+      .catch(() => {
+        // Ignore import errors
+      });
+  }, [onRefresh, model.id, onCustomSettingsChange]);
 
   return (
     <List.Item
@@ -153,26 +178,7 @@ function ModelItem({
           <Action.Push
             title="Advanced Settings"
             icon={Icon.Gear}
-            target={
-              <AdvancedSettingsForm
-                model={model}
-                onRefresh={() => {
-                  onRefresh();
-                  // Check if settings are custom after refresh
-                  import("./utils/models")
-                    .then(({ hasCustomModelSettings }) => {
-                      hasCustomModelSettings(model.id)
-                        .then(onCustomSettingsChange)
-                        .catch(() => {
-                          // Ignore errors checking custom settings
-                        });
-                    })
-                    .catch(() => {
-                      // Ignore import errors
-                    });
-                }}
-              />
-            }
+            target={<AdvancedSettingsForm model={model} onRefresh={handleSettingsRefresh} />}
           />
           <Action.CopyToClipboard title="Copy Model ID" content={model.id} />
         </ActionPanel>

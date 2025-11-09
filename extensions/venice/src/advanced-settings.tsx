@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Form, showToast, Toast, LocalStorage } from "@raycast/api";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 import { DEFAULT_MODEL_SETTINGS, STORAGE_KEYS } from "./constants";
 import { handleError } from "./utils/errors";
@@ -39,7 +39,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     setTemperatureInput(settings.temperature.toString());
   }, [settings.temperature]);
 
-  async function saveSettings() {
+  const saveSettings = useCallback(async () => {
     // Validate settings before saving
     const validationResult = ValidationService.validateModelSettings(settings);
     if (!validationResult.isValid) {
@@ -62,9 +62,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     } catch (error) {
       await handleError(error, "Save settings");
     }
-  }
+  }, [settings, model.id, model.name, onRefresh]);
 
-  async function resetToDefaults() {
+  const resetToDefaults = useCallback(async () => {
     setSettings(DEFAULT_MODEL_SETTINGS);
     setTemperatureInput(DEFAULT_MODEL_SETTINGS.temperature.toString());
     try {
@@ -78,7 +78,54 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     } catch (error) {
       await handleError(error, "Reset settings");
     }
-  }
+  }, [model.id, onRefresh]);
+
+  const handleTemperatureChange = useCallback((value: string) => {
+    setTemperatureInput(value);
+    if (value.trim() !== "") {
+      const validation = ValidationService.validateTemperatureInput(value);
+      if (validation.isValid) {
+        const parsed = parseFloat(value);
+        setSettings((prev) => ({ ...prev, temperature: parsed }));
+      }
+    }
+  }, []);
+
+  const handleTopPChange = useCallback((value: string) => {
+    if (value.trim() === "") {
+      setSettings((prev) => ({ ...prev, topP: undefined }));
+    } else {
+      const validation = ValidationService.validateTopPInput(value);
+      if (validation.isValid) {
+        const parsed = parseFloat(value);
+        setSettings((prev) => ({ ...prev, topP: parsed }));
+      }
+    }
+  }, []);
+
+  const handleTopKChange = useCallback((value: string) => {
+    if (value.trim() === "") {
+      setSettings((prev) => ({ ...prev, topK: undefined }));
+    } else {
+      const validation = ValidationService.validateTopKInput(value);
+      if (validation.isValid) {
+        const parsed = parseInt(value);
+        setSettings((prev) => ({ ...prev, topK: parsed }));
+      }
+    }
+  }, []);
+
+  const handleMaxTokensChange = useCallback((value: string) => {
+    if (value.trim() === "") {
+      setSettings((prev) => ({ ...prev, maxTokens: undefined }));
+    } else {
+      const validation = ValidationService.validateMaxTokensInput(value);
+      if (validation.isValid) {
+        const parsed = parseInt(value);
+        setSettings((prev) => ({ ...prev, maxTokens: parsed }));
+      }
+    }
+  }, []);
 
   if (isLoading) {
     return <Form isLoading={true} />;
@@ -98,18 +145,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         title="Temperature"
         placeholder="0.0 - 2.0"
         value={temperatureInput}
-        onChange={(value) => {
-          setTemperatureInput(value);
-
-          // Only update settings if we have a valid complete number within bounds
-          if (value.trim() !== "") {
-            const validation = ValidationService.validateTemperatureInput(value);
-            if (validation.isValid) {
-              const parsed = parseFloat(value);
-              setSettings((prev) => ({ ...prev, temperature: parsed }));
-            }
-          }
-        }}
+        onChange={handleTemperatureChange}
         info="Controls randomness in the output. Higher values (0.8-1.2) make output more random, lower values (0.2-0.5) make it more focused and deterministic."
       />
 
@@ -118,17 +154,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         title="Top P"
         placeholder="0.0 - 1.0"
         value={settings.topP?.toString() || ""}
-        onChange={(value) => {
-          if (value.trim() === "") {
-            setSettings((prev) => ({ ...prev, topP: undefined }));
-          } else {
-            const validation = ValidationService.validateTopPInput(value);
-            if (validation.isValid) {
-              const parsed = parseFloat(value);
-              setSettings((prev) => ({ ...prev, topP: parsed }));
-            }
-          }
-        }}
+        onChange={handleTopPChange}
         info="Nucleus sampling. Only tokens comprising the top-p probability mass are considered for sampling. Lower values focus on more probable tokens."
       />
 
@@ -137,17 +163,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         title="Top K"
         placeholder="1 - 100"
         value={settings.topK?.toString() || ""}
-        onChange={(value) => {
-          if (value.trim() === "") {
-            setSettings((prev) => ({ ...prev, topK: undefined }));
-          } else {
-            const validation = ValidationService.validateTopKInput(value);
-            if (validation.isValid) {
-              const parsed = parseInt(value);
-              setSettings((prev) => ({ ...prev, topK: parsed }));
-            }
-          }
-        }}
+        onChange={handleTopKChange}
         info="Top-K sampling. Only the top-k most likely tokens are considered for sampling. Lower values focus on more probable tokens."
       />
 
@@ -156,17 +172,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         title="Max Tokens"
         placeholder="1 - context window"
         value={settings.maxTokens?.toString() || ""}
-        onChange={(value) => {
-          if (value.trim() === "") {
-            setSettings((prev) => ({ ...prev, maxTokens: undefined }));
-          } else {
-            const validation = ValidationService.validateMaxTokensInput(value);
-            if (validation.isValid) {
-              const parsed = parseInt(value);
-              setSettings((prev) => ({ ...prev, maxTokens: parsed }));
-            }
-          }
-        }}
+        onChange={handleMaxTokensChange}
         info="Maximum number of tokens to generate in the response. Leave empty for model default."
       />
     </Form>

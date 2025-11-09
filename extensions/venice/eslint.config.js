@@ -26,9 +26,9 @@ module.exports = defineConfig([
     rules: {
       // Enforce the Rules of Hooks
       "react-hooks/rules-of-hooks": "error",
-      // Verify dependencies of hooks for stability; warn to avoid overly noisy failures
+      // Verify dependencies of hooks for stability - error to prevent bugs
       "react-hooks/exhaustive-deps": [
-        "warn",
+        "error",
         {
           // Track deps for @raycast/utils hook that accepts a deps array
           additionalHooks: "(useCachedPromise)",
@@ -77,6 +77,17 @@ module.exports = defineConfig([
       // React JSX best practices
       "react/jsx-key": "error",
       "react/jsx-no-useless-fragment": ["warn", { allowExpressions: true }],
+      // Prevent performance issues from inline functions/object creation
+      "react/jsx-no-bind": [
+        "error",
+        {
+          ignoreRefs: true,
+          allowArrowFunctions: false,
+          allowFunctions: false,
+          allowBind: false,
+          ignoreDOMComponents: false,
+        },
+      ],
 
       // Console usage
       "no-console": ["warn", { allow: ["warn", "error"] }],

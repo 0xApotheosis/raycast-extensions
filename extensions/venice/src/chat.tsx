@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef, memo } from "react";
 
 import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
 import { useChatModel } from "./hooks/useChatModel";
@@ -13,6 +13,72 @@ import { conversationToMarkdown } from "./utils/markdown";
 import { getModelSettings, hasCustomModelSettings } from "./utils/models";
 
 import type { VeniceModel, ModelSettings } from "./types";
+
+const ConversationListItem = memo(function ConversationListItem({
+  conversation,
+  isSelected,
+  isStreaming,
+  markdown,
+  onSend,
+  onNewChat,
+  onDelete,
+  onDeleteAll,
+  onCancelStreaming,
+}: {
+  conversation: Conversation;
+  isSelected: boolean;
+  isStreaming: boolean;
+  markdown: string | undefined;
+  onSend: () => void;
+  onNewChat: () => void;
+  onDelete: () => void;
+  onDeleteAll: () => void;
+  onCancelStreaming: () => void;
+}) {
+  const accessories = useMemo(() => {
+    const items = [];
+    if (isSelected && isStreaming) {
+      items.push({ text: "Typing…" });
+    }
+    items.push({ text: formatRelativeTime(conversation.updatedAt) });
+    return items;
+  }, [isSelected, isStreaming, conversation.updatedAt]);
+
+  return (
+    <List.Item
+      id={conversation.id}
+      title={conversation.title}
+      accessories={accessories}
+      detail={<List.Item.Detail markdown={markdown} />}
+      actions={
+        <ActionPanel>
+          <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
+          <Action title="New Chat" icon={Icon.Plus} onAction={onNewChat} shortcut={{ modifiers: ["cmd"], key: "n" }} />
+          <Action
+            title="Delete Chat"
+            icon={Icon.Trash}
+            onAction={onDelete}
+            shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+          />
+          <Action
+            title="Delete All Conversations"
+            icon={Icon.Trash}
+            style={Action.Style.Destructive}
+            onAction={onDeleteAll}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "backspace" }}
+          />
+          <Action
+            title="Cancel Streaming"
+            icon={Icon.Stop}
+            onAction={onCancelStreaming}
+            shortcut={{ modifiers: ["cmd"], key: "." }}
+          />
+          <Action.CopyToClipboard title="Copy Conversation" content={conversationToMarkdown(conversation)} />
+        </ActionPanel>
+      }
+    />
+  );
+});
 
 export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
@@ -198,7 +264,7 @@ export default function Command() {
     }
   }, [searchText, currentModel, save, modelSettings, sendMessage, generateTitle, ensureConversation]);
 
-  async function onNewChat() {
+  const onNewChat = useCallback(async () => {
     const id = `${Date.now()}`;
     const preferredModelId = await resolvePreferredModelId(currentModelId, models, model);
     const conv: Conversation = {
@@ -231,45 +297,67 @@ export default function Command() {
     if (preferredModelId && preferredModelId !== currentModelId) {
       setCurrentModelId(preferredModelId);
     }
-  }
+  }, [
+    conversations,
+    resolvePreferredModelId,
+    currentModelId,
+    models,
+    model,
+    setCurrentId,
+    save,
+    resetStream,
+    setCurrentModelId,
+  ]);
 
-  async function onDelete(id?: string) {
-    const targetId = id ?? currentId;
-    if (!targetId) return;
-    const ok = await confirmAlert({
-      title: "Delete Conversation?",
-      message: "This will remove the conversation permanently from your device.",
-      icon: Icon.Trash,
-      primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
+  const onDelete = useCallback(
+    async (id?: string) => {
+      const targetId = id ?? currentId;
+      if (!targetId) return;
+      const ok = await confirmAlert({
+        title: "Delete Conversation?",
+        message: "This will remove the conversation permanently from your device.",
+        icon: Icon.Trash,
+        primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
+      });
+      if (!ok) return;
+
+      // Find the index of the conversation being deleted
+      const deletedIndex = conversations.findIndex((c) => c.id === targetId);
+      const next = conversations.filter((c) => c.id !== targetId);
+
+      // Select the conversation at the same index, or the previous one if we deleted the last
+      const nextIndex = Math.min(deletedIndex, next.length - 1);
+      const nextId = next[nextIndex]?.id;
+
+      // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
+      isProgrammaticUpdateRef.current = true;
+
+      // Set selection synchronously BEFORE save triggers re-render
+      setCurrentId(nextId);
+      await save(next);
+      // Persist to storage (manual since we already updated currentId)
+      if (nextId) await writeLastConversationId(nextId);
+
+      // Clear the programmatic flag after a brief moment
+      setTimeout(() => {
+        isProgrammaticUpdateRef.current = false;
+      }, 100);
+
+      resetStream();
+    },
+    [currentId, conversations, setCurrentId, save, resetStream]
+  );
+
+  // Memoized delete handlers for each conversation - stable references
+  const deleteHandlers = useMemo(() => {
+    const handlers = new Map<string, () => Promise<void>>();
+    conversations.forEach((c) => {
+      handlers.set(c.id, () => onDelete(c.id));
     });
-    if (!ok) return;
+    return handlers;
+  }, [conversations, onDelete]);
 
-    // Find the index of the conversation being deleted
-    const deletedIndex = conversations.findIndex((c) => c.id === targetId);
-    const next = conversations.filter((c) => c.id !== targetId);
-
-    // Select the conversation at the same index, or the previous one if we deleted the last
-    const nextIndex = Math.min(deletedIndex, next.length - 1);
-    const nextId = next[nextIndex]?.id;
-
-    // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
-    isProgrammaticUpdateRef.current = true;
-
-    // Set selection synchronously BEFORE save triggers re-render
-    setCurrentId(nextId);
-    await save(next);
-    // Persist to storage (manual since we already updated currentId)
-    if (nextId) await writeLastConversationId(nextId);
-
-    // Clear the programmatic flag after a brief moment
-    setTimeout(() => {
-      isProgrammaticUpdateRef.current = false;
-    }, 100);
-
-    resetStream();
-  }
-
-  async function onDeleteAll() {
+  const onDeleteAll = useCallback(async () => {
     if (conversations.length === 0) return;
     const ok = await confirmAlert({
       title: "Delete All Conversations?",
@@ -296,7 +384,21 @@ export default function Command() {
       style: Toast.Style.Success,
       title: "All Conversations Deleted",
     });
-  }
+  }, [conversations.length, setCurrentId, save, resetStream]);
+
+  const handleSelectionChange = useCallback(
+    (id: string | null) => {
+      // Ignore ALL selection changes during programmatic updates
+      if (isProgrammaticUpdateRef.current) {
+        return;
+      }
+      // Only update if actually different
+      if (id && id !== currentId) {
+        setConversation(id);
+      }
+    },
+    [currentId, setConversation]
+  );
 
   return (
     <List
@@ -307,16 +409,7 @@ export default function Command() {
       filtering={false}
       searchText={searchText}
       onSearchTextChange={setSearchText}
-      onSelectionChange={(id) => {
-        // Ignore ALL selection changes during programmatic updates
-        if (isProgrammaticUpdateRef.current) {
-          return;
-        }
-        // Only update if actually different
-        if (id && id !== currentId) {
-          setConversation(id);
-        }
-      }}
+      onSelectionChange={handleSelectionChange}
       searchBarAccessory={
         <List.Dropdown tooltip="Select Model" value={currentModel?.id ?? currentModelId} onChange={onModelChange}>
           {models?.map((m) => (
@@ -336,7 +429,7 @@ export default function Command() {
           <Action
             title="Delete Chat"
             icon={Icon.Trash}
-            onAction={() => onDelete()}
+            onAction={onDelete}
             shortcut={{ modifiers: ["cmd"], key: "backspace" }}
           />
           <Action
@@ -355,44 +448,24 @@ export default function Command() {
         </ActionPanel>
       }
     >
-      {conversations.map((c) => (
-        <List.Item
-          id={c.id}
-          key={c.id}
-          title={c.title}
-          accessories={[
-            ...(c.id === currentId && isStreaming ? [{ text: "Typing…" as const }] : []),
-            { text: formatRelativeTime(c.updatedAt) },
-          ]}
-          detail={<List.Item.Detail markdown={c.id === currentId ? currentMarkdown : undefined} />}
-          actions={
-            <ActionPanel>
-              <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
-              <Action title="New Chat" icon={Icon.Plus} onAction={onNewChat} shortcut={{ modifiers: ["cmd"], key: "n" }} />
-              <Action
-                title="Delete Chat"
-                icon={Icon.Trash}
-                onAction={() => onDelete(c.id)}
-                shortcut={{ modifiers: ["cmd"], key: "backspace" }}
-              />
-              <Action
-                title="Delete All Conversations"
-                icon={Icon.Trash}
-                style={Action.Style.Destructive}
-                onAction={onDeleteAll}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "backspace" }}
-              />
-              <Action
-                title="Cancel Streaming"
-                icon={Icon.Stop}
-                onAction={cancelStreaming}
-                shortcut={{ modifiers: ["cmd"], key: "." }}
-              />
-              <Action.CopyToClipboard title="Copy Conversation" content={conversationToMarkdown(c)} />
-            </ActionPanel>
-          }
-        />
-      ))}
+      {conversations.map((c) => {
+        const handler = deleteHandlers.get(c.id);
+        if (!handler) return null;
+        return (
+          <ConversationListItem
+            key={c.id}
+            conversation={c}
+            isSelected={c.id === currentId}
+            isStreaming={isStreaming}
+            markdown={c.id === currentId ? currentMarkdown : undefined}
+            onSend={onSend}
+            onNewChat={onNewChat}
+            onDelete={handler}
+            onDeleteAll={onDeleteAll}
+            onCancelStreaming={cancelStreaming}
+          />
+        );
+      })}
     </List>
   );
 }
