@@ -269,6 +269,35 @@ export default function Command() {
     resetStream();
   }
 
+  async function onDeleteAll() {
+    if (conversations.length === 0) return;
+    const ok = await confirmAlert({
+      title: "Delete All Conversations?",
+      message: `This will permanently delete all ${conversations.length} conversation${conversations.length > 1 ? "s" : ""} from your device.`,
+      icon: Icon.Trash,
+      primaryAction: { title: "Delete All", style: Alert.ActionStyle.Destructive },
+    });
+    if (!ok) return;
+
+    // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
+    isProgrammaticUpdateRef.current = true;
+
+    setCurrentId(undefined);
+    await save([]);
+    await writeLastConversationId("");
+
+    // Clear the programmatic flag after a brief moment
+    setTimeout(() => {
+      isProgrammaticUpdateRef.current = false;
+    }, 100);
+
+    resetStream();
+    await showToast({
+      style: Toast.Style.Success,
+      title: "All Conversations Deleted",
+    });
+  }
+
   return (
     <List
       isLoading={isStreaming || isPending}
@@ -311,6 +340,13 @@ export default function Command() {
             shortcut={{ modifiers: ["cmd"], key: "backspace" }}
           />
           <Action
+            title="Delete All Conversations"
+            icon={Icon.Trash}
+            style={Action.Style.Destructive}
+            onAction={onDeleteAll}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "backspace" }}
+          />
+          <Action
             title="Cancel Streaming"
             icon={Icon.Stop}
             onAction={cancelStreaming}
@@ -332,8 +368,20 @@ export default function Command() {
           actions={
             <ActionPanel>
               <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
-              <Action title="New Chat" icon={Icon.Plus} onAction={onNewChat} />
-              <Action title="Delete Chat" icon={Icon.Trash} onAction={() => onDelete(c.id)} />
+              <Action title="New Chat" icon={Icon.Plus} onAction={onNewChat} shortcut={{ modifiers: ["cmd"], key: "n" }} />
+              <Action
+                title="Delete Chat"
+                icon={Icon.Trash}
+                onAction={() => onDelete(c.id)}
+                shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+              />
+              <Action
+                title="Delete All Conversations"
+                icon={Icon.Trash}
+                style={Action.Style.Destructive}
+                onAction={onDeleteAll}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "backspace" }}
+              />
               <Action
                 title="Cancel Streaming"
                 icon={Icon.Stop}
