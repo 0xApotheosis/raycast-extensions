@@ -6,7 +6,7 @@ import { useChatModel } from "./hooks/useChatModel";
 import { useChatStreaming } from "./hooks/useChatStreaming";
 import { useConversationManager } from "./hooks/useConversationManager";
 import { useDefaultModel } from "./hooks/useDefaultModel";
-import { type Conversation } from "./storage/conversations";
+import { type Conversation, writeLastConversationId } from "./storage/conversations";
 import { formatRelativeTime } from "./utils/date";
 import { handleError } from "./utils/errors";
 import { conversationToMarkdown } from "./utils/markdown";
@@ -117,14 +117,29 @@ export default function Command() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+
+    // Set selection BEFORE state update to prevent List flicker
+    setCurrentId(conv.id);
+    pendingSelectIdRef.current = conv.id;
+
     const next = [conv, ...conversations];
     const updatedList = await save(next);
-    await selectConversation(conv.id);
+
+    // Don't call selectConversation here - it will be called by List's onSelectionChange
+    // and we've already set the currentId. Just persist to storage directly.
+    await writeLastConversationId(conv.id);
+
+    // Delay clearing pendingSelectIdRef to allow List to stabilize
+    setTimeout(() => {
+      pendingSelectIdRef.current = null;
+    }, 300);
+
     // Ensure UI state reflects the preferred model ASAP
     if (preferredModelId && preferredModelId !== currentModelId) {
       setCurrentModelId(preferredModelId);
     }
     return { conv, list: updatedList };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentConversation,
     conversations,
@@ -135,6 +150,8 @@ export default function Command() {
     save,
     selectConversation,
     setCurrentModelId,
+    setCurrentId,
+    // pendingSelectIdRef is a ref and doesn't need to be in deps
   ]);
 
   const onSend = useCallback(async () => {
@@ -203,11 +220,25 @@ export default function Command() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+
+    // Set selection BEFORE state update to prevent List flicker
+    setCurrentId(id);
+    pendingSelectIdRef.current = id;
+
     const next = [conv, ...conversations];
     await save(next);
-    pendingSelectIdRef.current = id;
-    await selectConversation(id);
+
+    // Don't call selectConversation here - it will be called by List's onSelectionChange
+    // and we've already set the currentId. Just persist to storage directly.
+    await writeLastConversationId(id);
+
+    // Delay clearing pendingSelectIdRef to allow List to stabilize
+    setTimeout(() => {
+      pendingSelectIdRef.current = null;
+    }, 300);
+
     resetStream();
+
     // Ensure UI model picker reflects the preferred model immediately
     if (preferredModelId && preferredModelId !== currentModelId) {
       setCurrentModelId(preferredModelId);
