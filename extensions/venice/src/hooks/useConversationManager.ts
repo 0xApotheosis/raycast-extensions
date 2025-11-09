@@ -47,9 +47,7 @@ function conversationReducer(state: ConversationState, action: ConversationActio
     case "UPDATE_CONVERSATION":
       return {
         ...state,
-        conversations: state.conversations.map((c) =>
-          c.id === action.payload.id ? action.payload : c
-        ),
+        conversations: state.conversations.map((c) => (c.id === action.payload.id ? action.payload : c)),
       };
     case "DELETE_CONVERSATION":
       return {
@@ -86,10 +84,10 @@ export function useConversationManager() {
           const sorted = sortConversationsByDate(stored);
           const exists = lastId && sorted.some((c) => c.id === lastId);
           const initialId = exists ? lastId : sorted[0]?.id;
-          
+
           // Set pending selection to prevent List from triggering spurious changes during init
           pendingSelectIdRef.current = initialId ?? null;
-          
+
           dispatch({ type: "SET_CONVERSATIONS", payload: sorted });
           dispatch({ type: "SET_CURRENT_ID", payload: initialId });
         }
@@ -121,7 +119,7 @@ export function useConversationManager() {
   const resolvePreferredModelId = async (
     currentModelId: string | undefined,
     models: VeniceModel[] | undefined,
-    defaultModel: VeniceModel | undefined,
+    defaultModel: VeniceModel | undefined
   ): Promise<string | undefined> => {
     // 1) Use currentModelId if it exists and is valid
     if (currentModelId && models?.some((m) => m.id === currentModelId)) {
@@ -144,23 +142,26 @@ export function useConversationManager() {
   /**
    * Updates the current conversation selection.
    */
-  const selectConversation = useCallback(async (id: string | undefined) => {
-    if (state.isInitializing) {
-      return; // ignore selection changes during initial load to prevent flicker
-    }
-    const next = id ?? undefined;
-    // Suppress transient selection changes when we have a pending selection
-    if (pendingSelectIdRef.current !== null) {
-      if (next !== pendingSelectIdRef.current) {
-        return; // ignore flicker event - we're waiting for a specific selection
+  const selectConversation = useCallback(
+    async (id: string | undefined) => {
+      if (state.isInitializing) {
+        return; // ignore selection changes during initial load to prevent flicker
       }
-      pendingSelectIdRef.current = null;
-    }
-    if (next !== state.currentId) {
-      dispatch({ type: "SET_CURRENT_ID", payload: next });
-      if (next) await writeLastConversationId(next);
-    }
-  }, [state.isInitializing, state.currentId]);
+      const next = id ?? undefined;
+      // Suppress transient selection changes when we have a pending selection
+      if (pendingSelectIdRef.current !== null) {
+        if (next !== pendingSelectIdRef.current) {
+          return; // ignore flicker event - we're waiting for a specific selection
+        }
+        pendingSelectIdRef.current = null;
+      }
+      if (next !== state.currentId) {
+        dispatch({ type: "SET_CURRENT_ID", payload: next });
+        if (next) await writeLastConversationId(next);
+      }
+    },
+    [state.isInitializing, state.currentId]
+  );
 
   return {
     conversations: state.conversations,

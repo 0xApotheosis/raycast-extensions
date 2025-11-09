@@ -113,16 +113,16 @@ export const validateNumericInput = (
   if (allowEmpty && value.trim() === "") {
     return { isValid: true };
   }
-  
+
   const parsed = parseFloat(value);
   if (isNaN(parsed) || !isFinite(parsed)) {
     return { isValid: false, error: `${fieldName} must be a valid number` };
   }
-  
+
   if (parsed < min || parsed > max) {
     return { isValid: false, error: `${fieldName} must be between ${min} and ${max}` };
   }
-  
+
   return { isValid: true };
 };
 
@@ -139,16 +139,16 @@ export const validateIntegerInput = (
   if (allowEmpty && value.trim() === "") {
     return { isValid: true };
   }
-  
+
   const parsed = parseInt(value);
   if (isNaN(parsed) || !Number.isInteger(parsed)) {
     return { isValid: false, error: `${fieldName} must be a valid integer` };
   }
-  
+
   if (parsed < min || parsed > max) {
     return { isValid: false, error: `${fieldName} must be between ${min} and ${max}` };
   }
-  
+
   return { isValid: true };
 };
 

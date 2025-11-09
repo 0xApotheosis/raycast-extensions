@@ -14,7 +14,7 @@ export const handleError = async (
   options?: {
     hideToast?: boolean;
     logToConsole?: boolean;
-  },
+  }
 ): Promise<void> => {
   const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -45,7 +45,7 @@ export const handleError = async (
 export const safeAsync = async <T>(
   fn: () => Promise<T>,
   context: string,
-  onError?: (error: unknown) => void,
+  onError?: (error: unknown) => void
 ): Promise<T | undefined> => {
   try {
     return await fn();

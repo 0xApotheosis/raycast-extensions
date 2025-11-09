@@ -42,6 +42,6 @@ export function useModels() {
         // On error, try to serve stale cache if present
         return;
       },
-    },
+    }
   );
 }

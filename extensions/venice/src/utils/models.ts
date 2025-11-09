@@ -72,7 +72,7 @@ export async function batchHasCustomModelSettings(modelIds: string[]): Promise<R
   await Promise.all(
     modelIds.map(async (modelId) => {
       result[modelId] = await hasCustomModelSettings(modelId);
-    }),
+    })
   );
 
   return result;

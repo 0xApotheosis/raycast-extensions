@@ -80,6 +80,9 @@ module.exports = defineConfig([
 
       // Console usage
       "no-console": ["warn", { allow: ["warn", "error"] }],
+
+      // Whitespace
+      "no-trailing-spaces": "error",
     },
   },
 ]);

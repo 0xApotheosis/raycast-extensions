@@ -16,7 +16,7 @@ export function useChatStreaming() {
   const [caretOn, setCaretOn] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const [isPending, startTransition] = useTransition();
-  
+
   // Batch streaming updates to reduce re-renders
   const streamBufferRef = useRef("");
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -26,7 +26,7 @@ export function useChatStreaming() {
     if (updateTimeoutRef.current) {
       clearTimeout(updateTimeoutRef.current);
     }
-    
+
     updateTimeoutRef.current = setTimeout(() => {
       startTransition(() => {
         setStream(streamBufferRef.current);
@@ -40,14 +40,14 @@ export function useChatStreaming() {
       setCaretOn(false);
       return;
     }
-    
+
     // Debounce caret updates to reduce CPU usage
     const id = setInterval(() => {
       startTransition(() => {
         setCaretOn((v) => !v);
       });
     }, UI_CONSTANTS.CARET_BLINK_INTERVAL_MS);
-    
+
     return () => clearInterval(id);
   }, [isStreaming]);
 
@@ -69,7 +69,7 @@ export function useChatStreaming() {
       clearTimeout(updateTimeoutRef.current);
       updateTimeoutRef.current = null;
     }
-    
+
     streamBufferRef.current = "";
     setStream("");
     setIsStreaming(false);
@@ -84,7 +84,7 @@ export function useChatStreaming() {
       clearTimeout(updateTimeoutRef.current);
       updateTimeoutRef.current = null;
     }
-    
+
     streamBufferRef.current = "";
     setStream("");
     setIsStreaming(true);
@@ -95,142 +95,148 @@ export function useChatStreaming() {
   /**
    * Sends a message and streams the response
    */
-  const sendMessage = useCallback(async ({
-    conversation,
-    message,
-    model,
-    settings,
-    onUpdate,
-    onComplete,
-    onError,
-  }: {
-    conversation: Conversation;
-    message: string;
-    model: VeniceModel;
-    settings: ModelSettings;
-    onUpdate: (conversation: Conversation) => void;
-    onComplete: (conversation: Conversation) => void;
-    onError: (error: unknown) => void;
-  }) => {
-    const client = VeniceClient.getInstance();
-    let assistantText = "";
-    
-    try {
-      startStreaming();
-      
-      // Add user message to conversation
-      const now = Date.now();
-      const withUser: Conversation = {
-        ...conversation,
-        messages: [
-          ...conversation.messages,
-          {
-            id: `${now}-u`,
-            conversationId: conversation.id,
-            role: "user",
-            content: message,
-            createdAt: now,
+  const sendMessage = useCallback(
+    async ({
+      conversation,
+      message,
+      model,
+      settings,
+      onUpdate,
+      onComplete,
+      onError,
+    }: {
+      conversation: Conversation;
+      message: string;
+      model: VeniceModel;
+      settings: ModelSettings;
+      onUpdate: (conversation: Conversation) => void;
+      onComplete: (conversation: Conversation) => void;
+      onError: (error: unknown) => void;
+    }) => {
+      const client = VeniceClient.getInstance();
+      let assistantText = "";
+
+      try {
+        startStreaming();
+
+        // Add user message to conversation
+        const now = Date.now();
+        const withUser: Conversation = {
+          ...conversation,
+          messages: [
+            ...conversation.messages,
+            {
+              id: `${now}-u`,
+              conversationId: conversation.id,
+              role: "user",
+              content: message,
+              createdAt: now,
+            },
+          ],
+          updatedAt: now,
+          modelId: model.id,
+        };
+
+        onUpdate(withUser);
+
+        // Stream the assistant response
+        await client.streamChat({
+          model: model.id,
+          messages: withUser.messages.map((m) => ({ role: m.role, content: m.content })),
+          settings: {
+            temperature: settings.temperature,
+            top_p: settings.topP,
+            top_k: settings.topK,
+            max_tokens: settings.maxTokens,
           },
-        ],
-        updatedAt: now,
-        modelId: model.id,
-      };
-      
-      onUpdate(withUser);
-
-      // Stream the assistant response
-      await client.streamChat({
-        model: model.id,
-        messages: withUser.messages.map((m) => ({ role: m.role, content: m.content })),
-        settings: {
-          temperature: settings.temperature,
-          top_p: settings.topP,
-          top_k: settings.topK,
-          max_tokens: settings.maxTokens,
-        },
-        onChunk: (c) => {
-          if (c.type === "text" && c.data) {
-            assistantText += c.data;
-            streamBufferRef.current += c.data;
-            updateStream(); // Batched update
-          }
-        },
-        signal: abortRef.current?.signal,
-      });
-
-      // Add assistant message to conversation
-      const doneAt = Date.now();
-      const withAssistant: Conversation = {
-        ...withUser,
-        messages: [
-          ...withUser.messages,
-          {
-            id: `${doneAt}-a`,
-            conversationId: withUser.id,
-            role: "assistant",
-            content: assistantText,
-            createdAt: doneAt,
+          onChunk: (c) => {
+            if (c.type === "text" && c.data) {
+              assistantText += c.data;
+              streamBufferRef.current += c.data;
+              updateStream(); // Batched update
+            }
           },
-        ],
-        updatedAt: doneAt,
-      };
+          signal: abortRef.current?.signal,
+        });
 
-      resetStream();
-      onComplete(withAssistant);
-      
-      return withAssistant;
-    } catch (error) {
-      resetStream();
-      onError(error);
-      throw error;
-    }
-  }, [startStreaming, resetStream, updateStream]);
+        // Add assistant message to conversation
+        const doneAt = Date.now();
+        const withAssistant: Conversation = {
+          ...withUser,
+          messages: [
+            ...withUser.messages,
+            {
+              id: `${doneAt}-a`,
+              conversationId: withUser.id,
+              role: "assistant",
+              content: assistantText,
+              createdAt: doneAt,
+            },
+          ],
+          updatedAt: doneAt,
+        };
+
+        resetStream();
+        onComplete(withAssistant);
+
+        return withAssistant;
+      } catch (error) {
+        resetStream();
+        onError(error);
+        throw error;
+      }
+    },
+    [startStreaming, resetStream, updateStream]
+  );
 
   /**
    * Auto-generates a conversation title using the AI
    */
-  const generateTitle = useCallback(async ({
-    conversation,
-    model,
-    settings,
-  }: {
-    conversation: Conversation;
-    model: VeniceModel;
-    settings: ModelSettings;
-  }): Promise<string> => {
-    const client = VeniceClient.getInstance();
-    
-    try {
-      const summary = await client.completeChat({
-        model: model.id,
-        messages: [
-          { role: "system", content: UI_CONSTANTS.AUTO_NAME_SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: conversation.messages
-              .map((m) => `${m.role}: ${m.content}`)
-              .join("\n\n")
-              .slice(0, UI_CONSTANTS.AUTO_NAME_PROMPT_MAX_LENGTH),
+  const generateTitle = useCallback(
+    async ({
+      conversation,
+      model,
+      settings,
+    }: {
+      conversation: Conversation;
+      model: VeniceModel;
+      settings: ModelSettings;
+    }): Promise<string> => {
+      const client = VeniceClient.getInstance();
+
+      try {
+        const summary = await client.completeChat({
+          model: model.id,
+          messages: [
+            { role: "system", content: UI_CONSTANTS.AUTO_NAME_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: conversation.messages
+                .map((m) => `${m.role}: ${m.content}`)
+                .join("\n\n")
+                .slice(0, UI_CONSTANTS.AUTO_NAME_PROMPT_MAX_LENGTH),
+            },
+          ],
+          settings: {
+            max_tokens: UI_CONSTANTS.AUTO_NAME_MAX_TOKENS,
+            temperature: UI_CONSTANTS.AUTO_NAME_TEMPERATURE,
+            ...(settings.topP !== undefined && { top_p: settings.topP }),
+            ...(settings.topK !== undefined && { top_k: settings.topK }),
+            ...(settings.maxTokens !== undefined && { max_tokens: settings.maxTokens }),
           },
-        ],
-        settings: {
-          max_tokens: UI_CONSTANTS.AUTO_NAME_MAX_TOKENS,
-          temperature: UI_CONSTANTS.AUTO_NAME_TEMPERATURE,
-          ...(settings.topP !== undefined && { top_p: settings.topP }),
-          ...(settings.topK !== undefined && { top_k: settings.topK }),
-          ...(settings.maxTokens !== undefined && { max_tokens: settings.maxTokens }),
-        },
-        veniceParameters: {
-          disable_thinking: true,
-        },
-      });
-      
-      return summary.trim().replace(/\n/g, " ") || UI_CONSTANTS.NEW_CHAT_TITLE;
-    } catch (error) {
-      await handleError(error, "Chat naming");
-      return UI_CONSTANTS.NEW_CHAT_TITLE;
-    }
-  }, []);
+          veniceParameters: {
+            disable_thinking: true,
+          },
+        });
+
+        return summary.trim().replace(/\n/g, " ") || UI_CONSTANTS.NEW_CHAT_TITLE;
+      } catch (error) {
+        await handleError(error, "Chat naming");
+        return UI_CONSTANTS.NEW_CHAT_TITLE;
+      }
+    },
+    []
+  );
 
   /**
    * Cancels the current streaming operation

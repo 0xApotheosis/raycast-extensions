@@ -17,8 +17,15 @@ import type { VeniceModel, ModelSettings } from "./types";
 export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
-  const { conversations, currentId, setCurrentId, save, resolvePreferredModelId, selectConversation, pendingSelectIdRef } =
-    useConversationManager();
+  const {
+    conversations,
+    currentId,
+    setCurrentId,
+    save,
+    resolvePreferredModelId,
+    selectConversation,
+    pendingSelectIdRef,
+  } = useConversationManager();
   const { stream, isStreaming, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming, isPending } =
     useChatStreaming();
 
@@ -36,25 +43,25 @@ export default function Command() {
     (async () => {
       const settings: Record<string, ModelSettings> = {};
       const customModels = new Set<string>();
-      
+
       // Batch load all settings in parallel
       const settingsPromises = models.map(async (model) => {
         const [modelSettings, hasCustom] = await Promise.all([
           getModelSettings(model.id),
-          hasCustomModelSettings(model.id)
+          hasCustomModelSettings(model.id),
         ]);
         return { modelId: model.id, settings: modelSettings, hasCustom };
       });
-      
+
       const results = await Promise.all(settingsPromises);
-      
+
       results.forEach(({ modelId, settings: modelSettings, hasCustom }) => {
         settings[modelId] = modelSettings;
         if (hasCustom) {
           customModels.add(modelId);
         }
       });
-      
+
       setModelSettings(settings);
       setCustomSettingsModels(customModels);
     })();
@@ -62,10 +69,10 @@ export default function Command() {
 
   // Use pending selection if set for immediate UI feedback during transitions
   const effectiveCurrentId = pendingSelectIdRef.current ?? currentId;
-  
+
   const currentConversation: Conversation | undefined = useMemo(
     () => conversations.find((c) => c.id === effectiveCurrentId),
-    [conversations, effectiveCurrentId],
+    [conversations, effectiveCurrentId]
   );
 
   const currentModel: VeniceModel | undefined = useMemo(() => {
@@ -74,14 +81,17 @@ export default function Command() {
     return models?.find((m) => m.id === targetModelId) || models?.[0] || undefined;
   }, [models, currentConversation?.modelId, currentModelId]);
 
-  const onModelChange = useCallback(async (modelId: string) => {
-    setCurrentModelId(modelId);
-    await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, modelId);
-    if (currentConversation) {
-      const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
-      await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
-    }
-  }, [currentConversation, conversations, save, setCurrentModelId]);
+  const onModelChange = useCallback(
+    async (modelId: string) => {
+      setCurrentModelId(modelId);
+      await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, modelId);
+      if (currentConversation) {
+        const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
+        await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
+      }
+    },
+    [currentConversation, conversations, save, setCurrentModelId]
+  );
 
   const currentMarkdown = useMemo(() => {
     if (!currentConversation) return "";
@@ -115,18 +125,28 @@ export default function Command() {
       setCurrentModelId(preferredModelId);
     }
     return { conv, list: updatedList };
-  }, [currentConversation, conversations, resolvePreferredModelId, currentModelId, models, model, save, selectConversation, setCurrentModelId]);
+  }, [
+    currentConversation,
+    conversations,
+    resolvePreferredModelId,
+    currentModelId,
+    models,
+    model,
+    save,
+    selectConversation,
+    setCurrentModelId,
+  ]);
 
   const onSend = useCallback(async () => {
     const content = searchText.trim();
     if (!content || !currentModel) return;
-    
+
     // Clear input immediately for better UX
     setSearchText("");
 
     const { conv, list } = await ensureConversation();
     const settings = modelSettings[currentModel.id] || ({} as ModelSettings);
-    
+
     try {
       await sendMessage({
         conversation: conv,
@@ -140,9 +160,13 @@ export default function Command() {
         onComplete: async (completedConv) => {
           const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
           const finalConversations = await save(base.map((c) => (c.id === conv.id ? completedConv : c)));
-          
+
           // Auto-name after first assistant reply
-          if (completedConv.messages.length >= 2 && completedConv.title === UI_CONSTANTS.NEW_CHAT_TITLE && currentModel) {
+          if (
+            completedConv.messages.length >= 2 &&
+            completedConv.title === UI_CONSTANTS.NEW_CHAT_TITLE &&
+            currentModel
+          ) {
             try {
               const title = await generateTitle({
                 conversation: completedConv,
@@ -200,23 +224,23 @@ export default function Command() {
       primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
     });
     if (!ok) return;
-    
+
     // Find the index of the conversation being deleted
     const deletedIndex = conversations.findIndex((c) => c.id === targetId);
     const next = conversations.filter((c) => c.id !== targetId);
-    
+
     // Select the conversation at the same index, or the previous one if we deleted the last
     const nextIndex = Math.min(deletedIndex, next.length - 1);
     const nextId = next[nextIndex]?.id;
-    
+
     // Update currentId synchronously BEFORE updating conversations to prevent List flicker
     // This ensures selectedItemId always points to a valid item during the transition
     setCurrentId(nextId);
     pendingSelectIdRef.current = nextId ?? null;
-    
+
     // Now update conversations - List will see the new selection is already set
     await save(next);
-    
+
     // Persist the selection and reset stream
     await selectConversation(nextId);
     resetStream();

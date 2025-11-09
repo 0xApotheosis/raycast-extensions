@@ -30,7 +30,7 @@ export class VeniceClient {
   }
 
   async listModels(
-    type: "all" | "text" | "image" | "tts" | "embedding" | "upscale" | "inpaint" = "all",
+    type: "all" | "text" | "image" | "tts" | "embedding" | "upscale" | "inpaint" = "all"
   ): Promise<VeniceModel[]> {
     // No auth in proxy mode
     const url = new URL(`${this.baseUrl}/models`);
@@ -46,7 +46,7 @@ export class VeniceClient {
         model_spec?: { name?: string; availableContextTokens?: number; traits?: string[] };
       }>;
     };
-    
+
     if (!Array.isArray(payload.data)) {
       throw new Error("Invalid response format: expected data array");
     }
@@ -98,16 +98,16 @@ export class VeniceClient {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    
+
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split(/\n/);
         buffer = lines.pop() ?? ""; // leftover
-        
+
         // Process multiple chunks in a batch to reduce overhead
         const chunks: string[] = [];
         for (const line of lines) {
@@ -119,7 +119,7 @@ export class VeniceClient {
           }
           chunks.push(payload);
         }
-        
+
         // Batch process chunks to reduce function call overhead
         for (const payload of chunks) {
           try {
