@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 
 import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
 import { useChatModel } from "./hooks/useChatModel";
@@ -17,21 +17,17 @@ import type { VeniceModel, ModelSettings } from "./types";
 export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
-  const {
-    conversations,
-    currentId,
-    setCurrentId,
-    save,
-    resolvePreferredModelId,
-    selectConversation,
-    pendingSelectIdRef,
-  } = useConversationManager();
+  const { conversations, currentId, save, resolvePreferredModelId, setConversation, setCurrentId } =
+    useConversationManager();
   const { stream, isStreaming, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming, isPending } =
     useChatStreaming();
 
   const [searchText, setSearchText] = useState("");
   const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
   const [customSettingsModels, setCustomSettingsModels] = useState<Set<string>>(new Set());
+
+  // Track when we're doing a programmatic update to ignore ALL onSelectionChange events
+  const isProgrammaticUpdateRef = useRef(false);
 
   useEffect(() => {
     if (error) showToast({ style: Toast.Style.Failure, title: "Models error", message: String(error) });
@@ -67,12 +63,9 @@ export default function Command() {
     })();
   }, [models]);
 
-  // Use pending selection if set for immediate UI feedback during transitions
-  const effectiveCurrentId = pendingSelectIdRef.current ?? currentId;
-
   const currentConversation: Conversation | undefined = useMemo(
-    () => conversations.find((c) => c.id === effectiveCurrentId),
-    [conversations, effectiveCurrentId]
+    () => conversations.find((c) => c.id === currentId),
+    [conversations, currentId]
   );
 
   const currentModel: VeniceModel | undefined = useMemo(() => {
@@ -118,28 +111,26 @@ export default function Command() {
       updatedAt: Date.now(),
     };
 
-    // Set selection BEFORE state update to prevent List flicker
-    setCurrentId(conv.id);
-    pendingSelectIdRef.current = conv.id;
+    // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
+    isProgrammaticUpdateRef.current = true;
 
+    // Set selection synchronously BEFORE save triggers re-render
+    setCurrentId(conv.id);
     const next = [conv, ...conversations];
     const updatedList = await save(next);
-
-    // Don't call selectConversation here - it will be called by List's onSelectionChange
-    // and we've already set the currentId. Just persist to storage directly.
+    // Persist to storage (manual since we already updated currentId)
     await writeLastConversationId(conv.id);
 
-    // Delay clearing pendingSelectIdRef to allow List to stabilize
+    // Clear the programmatic flag after a brief moment
     setTimeout(() => {
-      pendingSelectIdRef.current = null;
-    }, 300);
+      isProgrammaticUpdateRef.current = false;
+    }, 100);
 
     // Ensure UI state reflects the preferred model ASAP
     if (preferredModelId && preferredModelId !== currentModelId) {
       setCurrentModelId(preferredModelId);
     }
     return { conv, list: updatedList };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentConversation,
     conversations,
@@ -148,10 +139,8 @@ export default function Command() {
     models,
     model,
     save,
-    selectConversation,
     setCurrentModelId,
     setCurrentId,
-    // pendingSelectIdRef is a ref and doesn't need to be in deps
   ]);
 
   const onSend = useCallback(async () => {
@@ -221,21 +210,20 @@ export default function Command() {
       updatedAt: Date.now(),
     };
 
-    // Set selection BEFORE state update to prevent List flicker
-    setCurrentId(id);
-    pendingSelectIdRef.current = id;
+    // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
+    isProgrammaticUpdateRef.current = true;
 
+    // Set selection synchronously BEFORE save triggers re-render
+    setCurrentId(id);
     const next = [conv, ...conversations];
     await save(next);
-
-    // Don't call selectConversation here - it will be called by List's onSelectionChange
-    // and we've already set the currentId. Just persist to storage directly.
+    // Persist to storage (manual since we already updated currentId)
     await writeLastConversationId(id);
 
-    // Delay clearing pendingSelectIdRef to allow List to stabilize
+    // Clear the programmatic flag after a brief moment
     setTimeout(() => {
-      pendingSelectIdRef.current = null;
-    }, 300);
+      isProgrammaticUpdateRef.current = false;
+    }, 100);
 
     resetStream();
 
@@ -264,16 +252,20 @@ export default function Command() {
     const nextIndex = Math.min(deletedIndex, next.length - 1);
     const nextId = next[nextIndex]?.id;
 
-    // Update currentId synchronously BEFORE updating conversations to prevent List flicker
-    // This ensures selectedItemId always points to a valid item during the transition
+    // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
+    isProgrammaticUpdateRef.current = true;
+
+    // Set selection synchronously BEFORE save triggers re-render
     setCurrentId(nextId);
-    pendingSelectIdRef.current = nextId ?? null;
-
-    // Now update conversations - List will see the new selection is already set
     await save(next);
+    // Persist to storage (manual since we already updated currentId)
+    if (nextId) await writeLastConversationId(nextId);
 
-    // Persist the selection and reset stream
-    await selectConversation(nextId);
+    // Clear the programmatic flag after a brief moment
+    setTimeout(() => {
+      isProgrammaticUpdateRef.current = false;
+    }, 100);
+
     resetStream();
   }
 
@@ -282,10 +274,20 @@ export default function Command() {
       isLoading={isStreaming || isPending}
       isShowingDetail
       searchBarPlaceholder="Ask a question privately... (Press Enter to send)"
-      selectedItemId={effectiveCurrentId}
+      selectedItemId={currentId}
       filtering={false}
       searchText={searchText}
       onSearchTextChange={setSearchText}
+      onSelectionChange={(id) => {
+        // Ignore ALL selection changes during programmatic updates
+        if (isProgrammaticUpdateRef.current) {
+          return;
+        }
+        // Only update if actually different
+        if (id && id !== currentId) {
+          setConversation(id);
+        }
+      }}
       searchBarAccessory={
         <List.Dropdown tooltip="Select Model" value={currentModel?.id ?? currentModelId} onChange={onModelChange}>
           {models?.map((m) => (
@@ -298,7 +300,6 @@ export default function Command() {
           ))}
         </List.Dropdown>
       }
-      onSelectionChange={(id) => selectConversation(id || undefined)}
       actions={
         <ActionPanel>
           <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
@@ -324,10 +325,10 @@ export default function Command() {
           key={c.id}
           title={c.title}
           accessories={[
-            ...(c.id === effectiveCurrentId && isStreaming ? [{ text: "Typing…" as const }] : []),
+            ...(c.id === currentId && isStreaming ? [{ text: "Typing…" as const }] : []),
             { text: formatRelativeTime(c.updatedAt) },
           ]}
-          detail={<List.Item.Detail markdown={c.id === effectiveCurrentId ? currentMarkdown : undefined} />}
+          detail={<List.Item.Detail markdown={c.id === currentId ? currentMarkdown : undefined} />}
           actions={
             <ActionPanel>
               <Action title="Send Message" icon={Icon.Airplane} onAction={onSend} />
@@ -339,7 +340,6 @@ export default function Command() {
                 onAction={cancelStreaming}
                 shortcut={{ modifiers: ["cmd"], key: "." }}
               />
-              <Action title="Open" onAction={() => selectConversation(c.id)} />
               <Action.CopyToClipboard title="Copy Conversation" content={conversationToMarkdown(c)} />
             </ActionPanel>
           }

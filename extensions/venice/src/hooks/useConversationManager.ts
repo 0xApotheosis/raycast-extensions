@@ -1,4 +1,4 @@
-import { useEffect, useRef, useReducer, useCallback } from "react";
+import { useEffect, useReducer, useCallback } from "react";
 
 import { STORAGE_KEYS } from "../constants";
 import {
@@ -72,7 +72,6 @@ export function useConversationManager() {
     currentId: undefined,
     isInitializing: true,
   });
-  const pendingSelectIdRef = useRef<string | null>(null);
 
   // Load conversations on mount and reconcile selection from persistent storage
   useEffect(() => {
@@ -85,9 +84,6 @@ export function useConversationManager() {
           const exists = lastId && sorted.some((c) => c.id === lastId);
           const initialId = exists ? lastId : sorted[0]?.id;
 
-          // Set pending selection to prevent List from triggering spurious changes during init
-          pendingSelectIdRef.current = initialId ?? null;
-
           dispatch({ type: "SET_CONVERSATIONS", payload: sorted });
           dispatch({ type: "SET_CURRENT_ID", payload: initialId });
         }
@@ -95,10 +91,6 @@ export function useConversationManager() {
         // ignore parse errors
       } finally {
         dispatch({ type: "SET_INITIALIZING", payload: false });
-        // Clear pending ref after a brief delay to allow the List to stabilize
-        setTimeout(() => {
-          pendingSelectIdRef.current = null;
-        }, 150);
       }
     })();
   }, []);
@@ -140,37 +132,32 @@ export function useConversationManager() {
   };
 
   /**
-   * Updates the current conversation selection.
+   * Updates the current conversation selection and persists it.
    */
-  const selectConversation = useCallback(
+  const setConversation = useCallback(
     async (id: string | undefined) => {
-      if (state.isInitializing) {
-        return; // ignore selection changes during initial load to prevent flicker
-      }
-      const next = id ?? undefined;
-      // Suppress transient selection changes when we have a pending selection
-      if (pendingSelectIdRef.current !== null) {
-        if (next !== pendingSelectIdRef.current) {
-          return; // ignore flicker event - we're waiting for a specific selection
-        }
-        pendingSelectIdRef.current = null;
-      }
-      if (next !== state.currentId) {
-        dispatch({ type: "SET_CURRENT_ID", payload: next });
-        if (next) await writeLastConversationId(next);
+      if (id !== state.currentId) {
+        dispatch({ type: "SET_CURRENT_ID", payload: id });
+        if (id) await writeLastConversationId(id);
       }
     },
-    [state.isInitializing, state.currentId]
+    [state.currentId]
   );
+
+  /**
+   * Synchronously sets the current conversation ID without persisting.
+   * Used to ensure UI state is correct before triggering re-renders.
+   */
+  const setCurrentId = useCallback((id: string | undefined) => {
+    dispatch({ type: "SET_CURRENT_ID", payload: id });
+  }, []);
 
   return {
     conversations: state.conversations,
     currentId: state.currentId,
-    setCurrentId: (id: string | undefined) => dispatch({ type: "SET_CURRENT_ID", payload: id }),
     save,
     resolvePreferredModelId,
-    selectConversation,
-    isInitializingRef: { current: state.isInitializing },
-    pendingSelectIdRef,
+    setConversation,
+    setCurrentId,
   };
 }
