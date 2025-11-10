@@ -10,7 +10,7 @@ import {
   confirmAlert,
   launchCommand,
 } from "@raycast/api";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 import {
   loadConversationsFromStorage,
@@ -26,6 +26,12 @@ export default function Command() {
   const { push } = useNavigation();
   const [searchText, setSearchText] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
+
+  // Keep a ref to always have the latest conversations state for async callbacks
+  const conversationsRef = useRef(conversations);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   useEffect(() => {
     (async () => {
@@ -60,7 +66,9 @@ export default function Command() {
       icon: Icon.Trash,
     });
     if (!ok) return;
-    const next = conversations.filter((c) => c.id !== id);
+    // Use ref to get latest state - avoids stale closure if deleting multiple conversations
+    const currentConvs = conversationsRef.current;
+    const next = currentConvs.filter((c) => c.id !== id);
     const sorted = sortConversationsByDate(next);
     setConversations(sorted);
     await writeConversationsStorage(sorted);
@@ -82,7 +90,9 @@ export default function Command() {
   const renameCallbacks = new Map<string, (title: string) => Promise<void>>();
   filtered.forEach((c) => {
     renameCallbacks.set(c.id, async (title: string) => {
-      const next = conversations.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
+      // Use ref to get latest state - avoids stale closure if renaming multiple conversations
+      const currentConvs = conversationsRef.current;
+      const next = currentConvs.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
       const sorted = sortConversationsByDate(next);
       setConversations(sorted);
       await writeConversationsStorage(sorted);

@@ -152,6 +152,7 @@ export function useConversationManager() {
   return {
     conversations: state.conversations,
     currentId: state.currentId,
+    isInitializing: state.isInitializing,
     save,
     resolvePreferredModelId,
     setConversation,

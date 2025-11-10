@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 
 import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
 import { useChatModel } from "./hooks/useChatModel";
@@ -78,12 +78,20 @@ function ConversationListItem({
 }
 
 export default function Command() {
-  const { model, models, error } = useDefaultModel("chat");
+  const { model, models, error, isLoading: isLoadingModels } = useDefaultModel("chat");
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
-  const { conversations, currentId, save, resolvePreferredModelId, setConversation, setCurrentId } =
+  const { conversations, currentId, isInitializing, save, resolvePreferredModelId, setConversation, setCurrentId } =
     useConversationManager();
-  const { stream, isStreaming, streamingConversationId, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming, isPending } =
-    useChatStreaming();
+  const {
+    isStreaming,
+    isConversationStreaming,
+    getStreamContent,
+    caretOn,
+    resetStream,
+    sendMessage,
+    generateTitle,
+    cancelStreaming,
+  } = useChatStreaming();
 
   const [searchText, setSearchText] = useState("");
   const [modelSettings, setModelSettings] = useState<Record<string, ModelSettings>>({});
@@ -91,6 +99,12 @@ export default function Command() {
 
   // Track when we're doing a programmatic update to ignore ALL onSelectionChange events
   const isProgrammaticUpdateRef = useRef(false);
+
+  // Keep a ref to always have the latest conversations state for async callbacks
+  const conversationsRef = useRef(conversations);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   useEffect(() => {
     if (error) showToast({ style: Toast.Style.Failure, title: "Models error", message: String(error) });
@@ -137,22 +151,29 @@ export default function Command() {
     await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, modelId);
     if (currentConversation) {
       const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
-      await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
+      // Use ref to get latest state in case of rapid model changes
+      const currentConvs = conversationsRef.current;
+      await save(currentConvs.map((c) => (c.id === currentConversation.id ? updated : c)));
     }
   };
 
-  let currentMarkdown = "";
-  if (currentConversation) {
+  // Memoize markdown generation to avoid unnecessary recalculations
+  const currentMarkdown = useMemo(() => {
+    if (!currentConversation) return "";
+
     const parts = currentConversation.messages.map((m) => {
       const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
       return `**${name}:**\n${m.content}`;
     });
-    if (stream || isStreaming) {
-      const caret = isStreaming && caretOn ? " ▍" : "";
-      parts.push(`**Venice AI (streaming):**\n${stream}${caret}`);
+
+    const streamContent = getStreamContent(currentConversation.id);
+    if (streamContent || isConversationStreaming(currentConversation.id)) {
+      const caret = isConversationStreaming(currentConversation.id) && caretOn ? " ▍" : "";
+      parts.push(`**Venice AI (streaming):**\n${streamContent}${caret}`);
     }
-    currentMarkdown = parts.join("\n\n---\n\n");
-  }
+
+    return parts.join("\n\n---\n\n");
+  }, [currentConversation, caretOn, getStreamContent, isConversationStreaming]);
 
   const ensureConversation = async (): Promise<{ conv: Conversation; list: Conversation[] }> => {
     if (currentConversation) return { conv: currentConversation, list: conversations };
@@ -195,7 +216,8 @@ export default function Command() {
     // Clear input immediately for better UX
     setSearchText("");
 
-    const { conv, list } = await ensureConversation();
+    const { conv } = await ensureConversation();
+    const conversationId = conv.id;
     const settings = modelSettings[currentModel.id] || ({} as ModelSettings);
 
     try {
@@ -204,13 +226,25 @@ export default function Command() {
         message: content,
         model: currentModel,
         settings,
-        onUpdate: async (updatedConv) => {
-          const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
-          await save(base.map((c) => (c.id === conv.id ? updatedConv : c)));
+        // Save user message immediately (once), moves conversation to top
+        onUserMessage: async (conversationWithUserMsg) => {
+          // Use ref to always get current conversations state (not stale closure)
+          const currentConvs = conversationsRef.current;
+          await save(
+            currentConvs.some((c) => c.id === conversationId)
+              ? currentConvs.map((c) => (c.id === conversationId ? conversationWithUserMsg : c))
+              : [conversationWithUserMsg, ...currentConvs]
+          );
         },
+        // Save complete conversation when streaming finishes
         onComplete: async (completedConv) => {
-          const base = list.some((c) => c.id === conv.id) ? list : [conv, ...list];
-          const finalConversations = await save(base.map((c) => (c.id === conv.id ? completedConv : c)));
+          // Use ref to always get current conversations state to avoid overwriting concurrent updates
+          const currentConvs = conversationsRef.current;
+          const finalConversations = await save(
+            currentConvs.some((c) => c.id === conversationId)
+              ? currentConvs.map((c) => (c.id === conversationId ? completedConv : c))
+              : [completedConv, ...currentConvs]
+          );
 
           // Auto-name after first assistant reply
           if (
@@ -228,7 +262,9 @@ export default function Command() {
                 ...completedConv,
                 title,
               };
-              await save(finalConversations.map((c) => (c.id === conv.id ? titled : c)));
+              // Use ref to get latest state - avoids overwriting concurrent title generations
+              const latestConvs = conversationsRef.current;
+              await save(latestConvs.map((c) => (c.id === conversationId ? titled : c)));
             } catch (e) {
               await handleError(e, "Chat naming");
             }
@@ -270,7 +306,7 @@ export default function Command() {
       isProgrammaticUpdateRef.current = false;
     }, 100);
 
-    resetStream();
+    // Don't reset any streams - allow multiple conversations to stream concurrently
 
     // Ensure UI model picker reflects the preferred model immediately
     if (preferredModelId && preferredModelId !== currentModelId) {
@@ -311,7 +347,8 @@ export default function Command() {
       isProgrammaticUpdateRef.current = false;
     }, 100);
 
-    resetStream();
+    // Reset only the stream for the deleted conversation
+    resetStream(targetId);
   };
 
   // Create delete handlers for each conversation
@@ -342,6 +379,7 @@ export default function Command() {
       isProgrammaticUpdateRef.current = false;
     }, 100);
 
+    // Reset all streams
     resetStream();
     await showToast({
       style: Toast.Style.Success,
@@ -362,7 +400,7 @@ export default function Command() {
 
   return (
     <List
-      isLoading={isStreaming || isPending}
+      isLoading={isLoadingModels || isInitializing || isStreaming}
       isShowingDetail
       searchBarPlaceholder="Ask a question privately... (Press Enter to send)"
       selectedItemId={currentId}
@@ -416,7 +454,7 @@ export default function Command() {
             key={c.id}
             conversation={c}
             isSelected={c.id === currentId}
-            isStreaming={isStreaming && c.id === streamingConversationId}
+            isStreaming={isConversationStreaming(c.id)}
             markdown={c.id === currentId ? currentMarkdown : undefined}
             onSend={onSend}
             onNewChat={onNewChat}

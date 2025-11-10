@@ -8,91 +8,132 @@ import type { Conversation } from "../storage/conversations";
 import type { VeniceModel, ModelSettings } from "../types";
 
 /**
- * Streaming chat hook that handles the complete chat streaming flow
+ * Stream state for a single conversation
+ */
+interface StreamState {
+  stream: string;
+  streamBuffer: string;
+  updateTimeout: NodeJS.Timeout | null;
+  abortController: AbortController;
+}
+
+/**
+ * Streaming chat hook that handles multiple concurrent chat streams
  */
 export function useChatStreaming() {
-  const [stream, setStream] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
+  // Track active streams per conversation ID
+  const streamStatesRef = useRef<Map<string, StreamState>>(new Map());
+  const [activeStreams, setActiveStreams] = useState<Set<string>>(new Set());
   const [caretOn, setCaretOn] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const [isPending, startTransition] = useTransition();
 
-  // Batch streaming updates to reduce re-renders
-  const streamBufferRef = useRef("");
-  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Debounced stream update function
-  const updateStream = () => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-
-    updateTimeoutRef.current = setTimeout(() => {
-      startTransition(() => {
-        setStream(streamBufferRef.current);
-      });
-    }, 16); // ~60fps update rate
-  };
-
-  // Blink caret while streaming (debounced)
+  // Blink caret while any stream is active
   useEffect(() => {
-    if (!isStreaming) {
+    if (activeStreams.size === 0) {
       setCaretOn(false);
       return;
     }
 
-    // Debounce caret updates to reduce CPU usage
+    // Blink at a reasonable rate to show activity without excessive re-renders
     const id = setInterval(() => {
-      startTransition(() => {
-        setCaretOn((v) => !v);
-      });
+      setCaretOn((v) => !v);
     }, UI_CONSTANTS.CARET_BLINK_INTERVAL_MS);
 
     return () => clearInterval(id);
-  }, [isStreaming]);
+  }, [activeStreams.size]);
 
-  // Cleanup timeouts on unmount
+  // Cleanup all timeouts on unmount
   useEffect(() => {
     return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
+      streamStatesRef.current.forEach((state) => {
+        if (state.updateTimeout) {
+          clearTimeout(state.updateTimeout);
+        }
+        state.abortController.abort();
+      });
+      streamStatesRef.current.clear();
     };
   }, []);
 
   /**
-   * Resets the streaming state.
+   * Gets or creates a stream state for a conversation
    */
-  const resetStream = () => {
-    // Clear any pending updates
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-      updateTimeoutRef.current = null;
+  const getOrCreateStreamState = (conversationId: string): StreamState => {
+    let state = streamStatesRef.current.get(conversationId);
+    if (!state) {
+      state = {
+        stream: "",
+        streamBuffer: "",
+        updateTimeout: null,
+        abortController: new AbortController(),
+      };
+      streamStatesRef.current.set(conversationId, state);
     }
-
-    streamBufferRef.current = "";
-    setStream("");
-    setIsStreaming(false);
-    setStreamingConversationId(null);
+    return state;
   };
 
   /**
-   * Starts a new streaming session.
+   * Debounced stream update function for a specific conversation
+   * Updates ref-based stream buffer without triggering React state changes
    */
-  const startStreaming = (conversationId: string) => {
-    // Clear any pending updates
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-      updateTimeoutRef.current = null;
+  const updateStream = (conversationId: string) => {
+    const state = streamStatesRef.current.get(conversationId);
+    if (!state) return;
+
+    // Cancel any pending update for this conversation
+    if (state.updateTimeout) {
+      clearTimeout(state.updateTimeout);
     }
 
-    streamBufferRef.current = "";
-    setStream("");
-    setIsStreaming(true);
-    setStreamingConversationId(conversationId);
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
+    // Debounce updates to reduce overhead - just update the ref
+    state.updateTimeout = setTimeout(() => {
+      state.stream = state.streamBuffer;
+    }, 16); // ~60fps update rate
+  };
+
+  /**
+   * Resets the streaming state for a specific conversation
+   */
+  const resetStream = (conversationId?: string) => {
+    if (conversationId) {
+      const state = streamStatesRef.current.get(conversationId);
+      if (state) {
+        if (state.updateTimeout) {
+          clearTimeout(state.updateTimeout);
+        }
+        state.abortController.abort();
+        streamStatesRef.current.delete(conversationId);
+      }
+      setActiveStreams((prev) => {
+        const next = new Set(prev);
+        next.delete(conversationId);
+        return next;
+      });
+    } else {
+      // Reset all streams
+      streamStatesRef.current.forEach((state) => {
+        if (state.updateTimeout) {
+          clearTimeout(state.updateTimeout);
+        }
+        state.abortController.abort();
+      });
+      streamStatesRef.current.clear();
+      setActiveStreams(new Set());
+    }
+  };
+
+  /**
+   * Starts a new streaming session for a conversation
+   */
+  const startStreaming = (conversationId: string) => {
+    // Clean up any existing stream for this conversation
+    resetStream(conversationId);
+
+    // Create new stream state
+    const state = getOrCreateStreamState(conversationId);
+    state.stream = "";
+    state.streamBuffer = "";
+
+    setActiveStreams((prev) => new Set(prev).add(conversationId));
   };
 
   /**
@@ -103,7 +144,7 @@ export function useChatStreaming() {
     message,
     model,
     settings,
-    onUpdate,
+    onUserMessage,
     onComplete,
     onError,
   }: {
@@ -111,15 +152,17 @@ export function useChatStreaming() {
     message: string;
     model: VeniceModel;
     settings: ModelSettings;
-    onUpdate: (conversation: Conversation) => void;
-    onComplete: (conversation: Conversation) => void;
+    onUserMessage: (conversation: Conversation) => Promise<void>;
+    onComplete: (conversation: Conversation) => Promise<void>;
     onError: (error: unknown) => void;
   }) => {
     const client = VeniceClient.getInstance();
+    const conversationId = conversation.id;
     let assistantText = "";
 
     try {
-      startStreaming(conversation.id);
+      startStreaming(conversationId);
+      const state = getOrCreateStreamState(conversationId);
 
       // Add user message to conversation
       const now = Date.now();
@@ -135,11 +178,12 @@ export function useChatStreaming() {
             createdAt: now,
           },
         ],
-        updatedAt: now,
+        updatedAt: now, // Only update timestamp when user sends message
         modelId: model.id,
       };
 
-      onUpdate(withUser);
+      // Persist user message to storage immediately
+      await onUserMessage(withUser);
 
       // Stream the assistant response
       await client.streamChat({
@@ -154,11 +198,12 @@ export function useChatStreaming() {
         onChunk: (c) => {
           if (c.type === "text" && c.data) {
             assistantText += c.data;
-            streamBufferRef.current += c.data;
-            updateStream(); // Batched update
+            state.streamBuffer += c.data;
+            // Debounced update - only updates in-memory ref, no state changes
+            updateStream(conversationId);
           }
         },
-        signal: abortRef.current?.signal,
+        signal: state.abortController.signal,
       });
 
       // Add assistant message to conversation
@@ -175,15 +220,16 @@ export function useChatStreaming() {
             createdAt: doneAt,
           },
         ],
-        updatedAt: doneAt,
+        // Keep the original updatedAt from user message, don't update on assistant response
+        updatedAt: withUser.updatedAt,
       };
 
-      resetStream();
-      onComplete(withAssistant);
+      resetStream(conversationId);
+      await onComplete(withAssistant);
 
       return withAssistant;
     } catch (error) {
-      resetStream();
+      resetStream(conversationId);
       onError(error);
       throw error;
     }
@@ -236,26 +282,38 @@ export function useChatStreaming() {
   };
 
   /**
-   * Cancels the current streaming operation
+   * Cancels streaming for a specific conversation or all conversations
    */
-  const cancelStreaming = () => {
-    abortRef.current?.abort();
-    resetStream();
+  const cancelStreaming = (conversationId?: string) => {
+    resetStream(conversationId);
+  };
+
+  /**
+   * Checks if a specific conversation is currently streaming
+   */
+  const isConversationStreaming = (conversationId: string): boolean => {
+    return activeStreams.has(conversationId);
+  };
+
+  /**
+   * Gets the current stream content for a conversation
+   */
+  const getStreamContent = (conversationId: string): string => {
+    return streamStatesRef.current.get(conversationId)?.stream || "";
   };
 
   return {
-    stream,
-    setStream,
-    isStreaming,
-    setIsStreaming,
-    streamingConversationId,
+    // State queries
+    isStreaming: activeStreams.size > 0,
+    activeStreams,
     caretOn,
-    abortRef,
+    isConversationStreaming,
+    getStreamContent,
+    // Actions
     resetStream,
     startStreaming,
     sendMessage,
     generateTitle,
     cancelStreaming,
-    isPending, // Expose transition state for UI optimization
   };
 }
