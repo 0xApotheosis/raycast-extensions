@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Form, showToast, Toast, LocalStorage } from "@raycast/api";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 
 import { DEFAULT_MODEL_SETTINGS, STORAGE_KEYS } from "./constants";
 import { handleError } from "./utils/errors";
@@ -39,7 +39,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     setTemperatureInput(settings.temperature.toString());
   }, [settings.temperature]);
 
-  const saveSettings = useCallback(async () => {
+  const saveSettings = async () => {
     // Validate settings before saving
     const validationResult = ValidationService.validateModelSettings(settings);
     if (!validationResult.isValid) {
@@ -62,9 +62,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     } catch (error) {
       await handleError(error, "Save settings");
     }
-  }, [settings, model.id, model.name, onRefresh]);
+  };
 
-  const resetToDefaults = useCallback(async () => {
+  const resetToDefaults = async () => {
     setSettings(DEFAULT_MODEL_SETTINGS);
     setTemperatureInput(DEFAULT_MODEL_SETTINGS.temperature.toString());
     try {
@@ -78,9 +78,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
     } catch (error) {
       await handleError(error, "Reset settings");
     }
-  }, [model.id, onRefresh]);
+  };
 
-  const handleTemperatureChange = useCallback((value: string) => {
+  const handleTemperatureChange = (value: string) => {
     setTemperatureInput(value);
     if (value.trim() !== "") {
       const validation = ValidationService.validateTemperatureInput(value);
@@ -89,9 +89,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         setSettings((prev) => ({ ...prev, temperature: parsed }));
       }
     }
-  }, []);
+  };
 
-  const handleTopPChange = useCallback((value: string) => {
+  const handleTopPChange = (value: string) => {
     if (value.trim() === "") {
       setSettings((prev) => ({ ...prev, topP: undefined }));
     } else {
@@ -101,9 +101,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         setSettings((prev) => ({ ...prev, topP: parsed }));
       }
     }
-  }, []);
+  };
 
-  const handleTopKChange = useCallback((value: string) => {
+  const handleTopKChange = (value: string) => {
     if (value.trim() === "") {
       setSettings((prev) => ({ ...prev, topK: undefined }));
     } else {
@@ -113,9 +113,9 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         setSettings((prev) => ({ ...prev, topK: parsed }));
       }
     }
-  }, []);
+  };
 
-  const handleMaxTokensChange = useCallback((value: string) => {
+  const handleMaxTokensChange = (value: string) => {
     if (value.trim() === "") {
       setSettings((prev) => ({ ...prev, maxTokens: undefined }));
     } else {
@@ -125,7 +125,7 @@ export default function AdvancedSettingsForm({ model, onRefresh }: AdvancedSetti
         setSettings((prev) => ({ ...prev, maxTokens: parsed }));
       }
     }
-  }, []);
+  };
 
   if (isLoading) {
     return <Form isLoading={true} />;

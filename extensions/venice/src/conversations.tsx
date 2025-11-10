@@ -10,7 +10,7 @@ import {
   confirmAlert,
   launchCommand,
 } from "@raycast/api";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 
 import {
   loadConversationsFromStorage,
@@ -40,10 +40,10 @@ export default function Command() {
     })();
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter((c) => {
+  const q = searchText.trim().toLowerCase();
+  const filtered = !q
+    ? conversations
+    : conversations.filter((c) => {
       if (c.title.toLowerCase().includes(q)) return true;
       const text = c.messages
         .map((m) => m.content)
@@ -51,69 +51,53 @@ export default function Command() {
         .toLowerCase();
       return text.includes(q);
     });
-  }, [conversations, searchText]);
 
-  const remove = useCallback(
-    async (id: string) => {
-      const ok = await confirmAlert({
-        title: "Delete Conversation?",
-        message: "This will remove the conversation permanently from your device.",
-        primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
-        icon: Icon.Trash,
-      });
-      if (!ok) return;
-      const next = conversations.filter((c) => c.id !== id);
+  const remove = async (id: string) => {
+    const ok = await confirmAlert({
+      title: "Delete Conversation?",
+      message: "This will remove the conversation permanently from your device.",
+      primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
+      icon: Icon.Trash,
+    });
+    if (!ok) return;
+    const next = conversations.filter((c) => c.id !== id);
+    const sorted = sortConversationsByDate(next);
+    setConversations(sorted);
+    await writeConversationsStorage(sorted);
+  };
+
+  const deleteHandlers = new Map<string, () => Promise<void>>();
+  filtered.forEach((c) => {
+    deleteHandlers.set(c.id, () => remove(c.id));
+  });
+
+  const openInChatHandlers = new Map<string, () => Promise<void>>();
+  filtered.forEach((c) => {
+    openInChatHandlers.set(c.id, async () => {
+      await writeLastConversationId(c.id);
+      await launchCommand({ name: "chat", type: LaunchType.UserInitiated });
+    });
+  });
+
+  const renameCallbacks = new Map<string, (title: string) => Promise<void>>();
+  filtered.forEach((c) => {
+    renameCallbacks.set(c.id, async (title: string) => {
+      const next = conversations.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
       const sorted = sortConversationsByDate(next);
       setConversations(sorted);
       await writeConversationsStorage(sorted);
-    },
-    [conversations]
-  );
-
-  const deleteHandlers = useMemo(() => {
-    const handlers = new Map<string, () => Promise<void>>();
-    filtered.forEach((c) => {
-      handlers.set(c.id, () => remove(c.id));
     });
-    return handlers;
-  }, [filtered, remove]);
+  });
 
-  const openInChatHandlers = useMemo(() => {
-    const handlers = new Map<string, () => Promise<void>>();
-    filtered.forEach((c) => {
-      handlers.set(c.id, async () => {
-        await writeLastConversationId(c.id);
-        await launchCommand({ name: "chat", type: LaunchType.UserInitiated });
+  const renameHandlers = new Map<string, () => Promise<void>>();
+  filtered.forEach((c) => {
+    const callback = renameCallbacks.get(c.id);
+    if (callback) {
+      renameHandlers.set(c.id, async () => {
+        push(<RenameForm initial={c.title} onSubmit={callback} />);
       });
-    });
-    return handlers;
-  }, [filtered]);
-
-  const renameCallbacks = useMemo(() => {
-    const callbacks = new Map<string, (title: string) => Promise<void>>();
-    filtered.forEach((c) => {
-      callbacks.set(c.id, async (title: string) => {
-        const next = conversations.map((x) => (x.id === c.id ? { ...x, title, updatedAt: Date.now() } : x));
-        const sorted = sortConversationsByDate(next);
-        setConversations(sorted);
-        await writeConversationsStorage(sorted);
-      });
-    });
-    return callbacks;
-  }, [filtered, conversations]);
-
-  const renameHandlers = useMemo(() => {
-    const handlers = new Map<string, () => Promise<void>>();
-    filtered.forEach((c) => {
-      const callback = renameCallbacks.get(c.id);
-      if (callback) {
-        handlers.set(c.id, async () => {
-          push(<RenameForm initial={c.title} onSubmit={callback} />);
-        });
-      }
-    });
-    return handlers;
-  }, [filtered, push, renameCallbacks]);
+    }
+  });
 
   return (
     <List
@@ -153,13 +137,10 @@ export default function Command() {
 function RenameForm(props: { initial: string; onSubmit: (title: string) => Promise<void> }) {
   const { pop } = useNavigation();
 
-  const handleSubmit = useCallback(
-    async (values: { title: string }) => {
-      await props.onSubmit(values.title.trim() || props.initial);
-      pop();
-    },
-    [props, pop]
-  );
+  const handleSubmit = async (values: { title: string }) => {
+    await props.onSubmit(values.title.trim() || props.initial);
+    pop();
+  };
 
   return (
     <Form

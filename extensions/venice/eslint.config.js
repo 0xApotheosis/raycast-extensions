@@ -5,9 +5,13 @@ const promisePlugin = require("eslint-plugin-promise");
 const reactHooks = require("eslint-plugin-react-hooks");
 const unusedImports = require("eslint-plugin-unused-imports");
 const react = require("eslint-plugin-react");
+const reactCompiler = require("eslint-plugin-react-compiler");
 
 module.exports = defineConfig([
   ...raycastConfig,
+  {
+    ignores: ["*.config.js", "babel.config.js"],
+  },
   {
     languageOptions: {
       parserOptions: {
@@ -18,6 +22,7 @@ module.exports = defineConfig([
     },
     plugins: {
       "react-hooks": reactHooks,
+      "react-compiler": reactCompiler,
       import: importPlugin,
       "unused-imports": unusedImports,
       promise: promisePlugin,
@@ -34,6 +39,9 @@ module.exports = defineConfig([
           additionalHooks: "(useCachedPromise)",
         },
       ],
+
+      // React Compiler - enforce Rules of React for optimal compilation
+      "react-compiler/react-compiler": "error",
 
       // Import hygiene and performance
       "import/no-duplicates": "error",
@@ -77,17 +85,8 @@ module.exports = defineConfig([
       // React JSX best practices
       "react/jsx-key": "error",
       "react/jsx-no-useless-fragment": ["warn", { allowExpressions: true }],
-      // Prevent performance issues from inline functions/object creation
-      "react/jsx-no-bind": [
-        "error",
-        {
-          ignoreRefs: true,
-          allowArrowFunctions: false,
-          allowFunctions: false,
-          allowBind: false,
-          ignoreDOMComponents: false,
-        },
-      ],
+      // React Compiler handles memoization automatically, so inline functions are now fine
+      "react/jsx-no-bind": "off",
 
       // Console usage
       "no-console": ["warn", { allow: ["warn", "error"] }],

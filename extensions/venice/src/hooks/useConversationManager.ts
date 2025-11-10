@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useCallback } from "react";
+import { useEffect, useReducer } from "react";
 
 import { STORAGE_KEYS } from "../constants";
 import {
@@ -98,12 +98,12 @@ export function useConversationManager() {
   /**
    * Saves conversations to storage and updates state.
    */
-  const save = useCallback(async (updated: Conversation[]): Promise<Conversation[]> => {
+  const save = async (updated: Conversation[]): Promise<Conversation[]> => {
     const sorted = sortConversationsByDate(updated);
     dispatch({ type: "SET_CONVERSATIONS", payload: sorted });
     await writeConversationsStorage(sorted);
     return sorted;
-  }, []);
+  };
 
   /**
    * Determines the preferred model id for new chats.
@@ -134,23 +134,20 @@ export function useConversationManager() {
   /**
    * Updates the current conversation selection and persists it.
    */
-  const setConversation = useCallback(
-    async (id: string | undefined) => {
-      if (id !== state.currentId) {
-        dispatch({ type: "SET_CURRENT_ID", payload: id });
-        if (id) await writeLastConversationId(id);
-      }
-    },
-    [state.currentId]
-  );
+  const setConversation = async (id: string | undefined) => {
+    if (id !== state.currentId) {
+      dispatch({ type: "SET_CURRENT_ID", payload: id });
+      if (id) await writeLastConversationId(id);
+    }
+  };
 
   /**
    * Synchronously sets the current conversation ID without persisting.
    * Used to ensure UI state is correct before triggering re-renders.
    */
-  const setCurrentId = useCallback((id: string | undefined) => {
+  const setCurrentId = (id: string | undefined) => {
     dispatch({ type: "SET_CURRENT_ID", payload: id });
-  }, []);
+  };
 
   return {
     conversations: state.conversations,

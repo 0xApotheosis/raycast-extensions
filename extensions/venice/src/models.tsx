@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Icon, List, Color, showToast, Toast, LocalStorage } from "@raycast/api";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 
 import AdvancedSettingsForm from "./advanced-settings";
 import { STORAGE_KEYS } from "./constants";
@@ -46,7 +46,7 @@ export default function Command() {
   const [filter, setFilter] = useState<CapabilityFilter>("all");
   const { defaultModelId, setDefaultModelId } = useDefaultModelId();
   const [customSettingsMap, setCustomSettingsMap] = useState<Record<string, boolean>>({});
-  const filtered = useMemo(() => (models ? filterModelsByCapability(models, filter) : []), [models, filter]);
+  const filtered = models ? filterModelsByCapability(models, filter) : [];
 
   // Batch load custom settings for all models
   useEffect(() => {
@@ -65,15 +65,12 @@ export default function Command() {
     }
   }, [error]);
 
-  const customSettingsHandlers = useMemo(() => {
-    const handlers = new Map<string, (hasCustom: boolean) => void>();
-    filtered?.forEach((m) => {
-      handlers.set(m.id, (hasCustom: boolean) => {
-        setCustomSettingsMap((prev) => ({ ...prev, [m.id]: hasCustom }));
-      });
+  const customSettingsHandlers = new Map<string, (hasCustom: boolean) => void>();
+  filtered?.forEach((m) => {
+    customSettingsHandlers.set(m.id, (hasCustom: boolean) => {
+      setCustomSettingsMap((prev) => ({ ...prev, [m.id]: hasCustom }));
     });
-    return handlers;
-  }, [filtered]);
+  });
 
   return (
     <List
@@ -103,7 +100,7 @@ export default function Command() {
 }
 
 function CapabilityDropdown(props: { value: CapabilityFilter; onChange: (v: CapabilityFilter) => void }) {
-  const handleChange = useCallback((v: string) => props.onChange(v as CapabilityFilter), [props]);
+  const handleChange = (v: string) => props.onChange(v as CapabilityFilter);
 
   return (
     <List.Dropdown tooltip="Filter by capability" value={props.value} onChange={handleChange}>
@@ -140,7 +137,7 @@ function ModelItem({
   accessories.push({ tag: { value: model.capabilities.join(", "), color: Color.Blue } });
   if (model.contextWindow) accessories.push({ text: `${model.contextWindow} tokens` });
 
-  const handleSetAsDefault = useCallback(async () => {
+  const handleSetAsDefault = async () => {
     try {
       await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, model.id);
       setDefaultModelId(model.id);
@@ -149,9 +146,9 @@ function ModelItem({
     } catch (e) {
       await handleError(e, "Set default model");
     }
-  }, [model.id, model.name, setDefaultModelId, onRefresh]);
+  };
 
-  const handleSettingsRefresh = useCallback(() => {
+  const handleSettingsRefresh = () => {
     onRefresh();
     import("./utils/models")
       .then(({ hasCustomModelSettings }) => {
@@ -164,7 +161,7 @@ function ModelItem({
       .catch(() => {
         // Ignore import errors
       });
-  }, [onRefresh, model.id, onCustomSettingsChange]);
+  };
 
   return (
     <List.Item

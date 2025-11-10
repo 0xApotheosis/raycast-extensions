@@ -1,5 +1,5 @@
 import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
-import { useEffect, useMemo, useState, useCallback, useRef, memo } from "react";
+import { useEffect, useState, useRef } from "react";
 
 import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
 import { useChatModel } from "./hooks/useChatModel";
@@ -14,7 +14,7 @@ import { getModelSettings, hasCustomModelSettings } from "./utils/models";
 
 import type { VeniceModel, ModelSettings } from "./types";
 
-const ConversationListItem = memo(function ConversationListItem({
+function ConversationListItem({
   conversation,
   isSelected,
   isStreaming,
@@ -35,14 +35,11 @@ const ConversationListItem = memo(function ConversationListItem({
   onDeleteAll: () => void;
   onCancelStreaming: () => void;
 }) {
-  const accessories = useMemo(() => {
-    const items = [];
-    if (isSelected && isStreaming) {
-      items.push({ text: "Typing…" });
-    }
-    items.push({ text: formatRelativeTime(conversation.updatedAt) });
-    return items;
-  }, [isSelected, isStreaming, conversation.updatedAt]);
+  const accessories = [];
+  if (isSelected && isStreaming) {
+    accessories.push({ text: "Typing…" });
+  }
+  accessories.push({ text: formatRelativeTime(conversation.updatedAt) });
 
   return (
     <List.Item
@@ -78,7 +75,7 @@ const ConversationListItem = memo(function ConversationListItem({
       }
     />
   );
-});
+}
 
 export default function Command() {
   const { model, models, error } = useDefaultModel("chat");
@@ -129,31 +126,23 @@ export default function Command() {
     })();
   }, [models]);
 
-  const currentConversation: Conversation | undefined = useMemo(
-    () => conversations.find((c) => c.id === currentId),
-    [conversations, currentId]
-  );
+  const currentConversation: Conversation | undefined = conversations.find((c) => c.id === currentId);
 
-  const currentModel: VeniceModel | undefined = useMemo(() => {
-    // Priority order: current conversation model > saved default > first model
-    const targetModelId = currentConversation?.modelId ?? currentModelId;
-    return models?.find((m) => m.id === targetModelId) || models?.[0] || undefined;
-  }, [models, currentConversation?.modelId, currentModelId]);
+  // Priority order: current conversation model > saved default > first model
+  const targetModelId = currentConversation?.modelId ?? currentModelId;
+  const currentModel: VeniceModel | undefined = models?.find((m) => m.id === targetModelId) || models?.[0] || undefined;
 
-  const onModelChange = useCallback(
-    async (modelId: string) => {
-      setCurrentModelId(modelId);
-      await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, modelId);
-      if (currentConversation) {
-        const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
-        await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
-      }
-    },
-    [currentConversation, conversations, save, setCurrentModelId]
-  );
+  const onModelChange = async (modelId: string) => {
+    setCurrentModelId(modelId);
+    await LocalStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL, modelId);
+    if (currentConversation) {
+      const updated: Conversation = { ...currentConversation, modelId, updatedAt: currentConversation.updatedAt };
+      await save(conversations.map((c) => (c.id === currentConversation.id ? updated : c)));
+    }
+  };
 
-  const currentMarkdown = useMemo(() => {
-    if (!currentConversation) return "";
+  let currentMarkdown = "";
+  if (currentConversation) {
     const parts = currentConversation.messages.map((m) => {
       const name = m.role === "user" ? "You" : m.role === "assistant" ? "Venice AI" : m.role;
       return `**${name}:**\n${m.content}`;
@@ -162,10 +151,10 @@ export default function Command() {
       const caret = isStreaming && caretOn ? " ▍" : "";
       parts.push(`**Venice AI (streaming):**\n${stream}${caret}`);
     }
-    return parts.join("\n\n---\n\n");
-  }, [currentConversation, stream, isStreaming, caretOn]);
+    currentMarkdown = parts.join("\n\n---\n\n");
+  }
 
-  const ensureConversation = useCallback(async (): Promise<{ conv: Conversation; list: Conversation[] }> => {
+  const ensureConversation = async (): Promise<{ conv: Conversation; list: Conversation[] }> => {
     if (currentConversation) return { conv: currentConversation, list: conversations };
     const preferredModelId = await resolvePreferredModelId(currentModelId, models, model);
     const conv: Conversation = {
@@ -197,19 +186,9 @@ export default function Command() {
       setCurrentModelId(preferredModelId);
     }
     return { conv, list: updatedList };
-  }, [
-    currentConversation,
-    conversations,
-    resolvePreferredModelId,
-    currentModelId,
-    models,
-    model,
-    save,
-    setCurrentModelId,
-    setCurrentId,
-  ]);
+  };
 
-  const onSend = useCallback(async () => {
+  const onSend = async () => {
     const content = searchText.trim();
     if (!content || !currentModel) return;
 
@@ -262,9 +241,9 @@ export default function Command() {
     } catch (error) {
       await handleError(error, "Chat");
     }
-  }, [searchText, currentModel, save, modelSettings, sendMessage, generateTitle, ensureConversation]);
+  };
 
-  const onNewChat = useCallback(async () => {
+  const onNewChat = async () => {
     const id = `${Date.now()}`;
     const preferredModelId = await resolvePreferredModelId(currentModelId, models, model);
     const conv: Conversation = {
@@ -297,67 +276,51 @@ export default function Command() {
     if (preferredModelId && preferredModelId !== currentModelId) {
       setCurrentModelId(preferredModelId);
     }
-  }, [
-    conversations,
-    resolvePreferredModelId,
-    currentModelId,
-    models,
-    model,
-    setCurrentId,
-    save,
-    resetStream,
-    setCurrentModelId,
-  ]);
+  };
 
-  const onDelete = useCallback(
-    async (id?: string) => {
-      const targetId = id ?? currentId;
-      if (!targetId) return;
-      const ok = await confirmAlert({
-        title: "Delete Conversation?",
-        message: "This will remove the conversation permanently from your device.",
-        icon: Icon.Trash,
-        primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
-      });
-      if (!ok) return;
-
-      // Find the index of the conversation being deleted
-      const deletedIndex = conversations.findIndex((c) => c.id === targetId);
-      const next = conversations.filter((c) => c.id !== targetId);
-
-      // Select the conversation at the same index, or the previous one if we deleted the last
-      const nextIndex = Math.min(deletedIndex, next.length - 1);
-      const nextId = next[nextIndex]?.id;
-
-      // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
-      isProgrammaticUpdateRef.current = true;
-
-      // Set selection synchronously BEFORE save triggers re-render
-      setCurrentId(nextId);
-      await save(next);
-      // Persist to storage (manual since we already updated currentId)
-      if (nextId) await writeLastConversationId(nextId);
-
-      // Clear the programmatic flag after a brief moment
-      setTimeout(() => {
-        isProgrammaticUpdateRef.current = false;
-      }, 100);
-
-      resetStream();
-    },
-    [currentId, conversations, setCurrentId, save, resetStream]
-  );
-
-  // Memoized delete handlers for each conversation - stable references
-  const deleteHandlers = useMemo(() => {
-    const handlers = new Map<string, () => Promise<void>>();
-    conversations.forEach((c) => {
-      handlers.set(c.id, () => onDelete(c.id));
+  const onDelete = async (id?: string) => {
+    const targetId = id ?? currentId;
+    if (!targetId) return;
+    const ok = await confirmAlert({
+      title: "Delete Conversation?",
+      message: "This will remove the conversation permanently from your device.",
+      icon: Icon.Trash,
+      primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
     });
-    return handlers;
-  }, [conversations, onDelete]);
+    if (!ok) return;
 
-  const onDeleteAll = useCallback(async () => {
+    // Find the index of the conversation being deleted
+    const deletedIndex = conversations.findIndex((c) => c.id === targetId);
+    const next = conversations.filter((c) => c.id !== targetId);
+
+    // Select the conversation at the same index, or the previous one if we deleted the last
+    const nextIndex = Math.min(deletedIndex, next.length - 1);
+    const nextId = next[nextIndex]?.id;
+
+    // Mark that we're doing a programmatic update to ignore ALL onSelectionChange events
+    isProgrammaticUpdateRef.current = true;
+
+    // Set selection synchronously BEFORE save triggers re-render
+    setCurrentId(nextId);
+    await save(next);
+    // Persist to storage (manual since we already updated currentId)
+    if (nextId) await writeLastConversationId(nextId);
+
+    // Clear the programmatic flag after a brief moment
+    setTimeout(() => {
+      isProgrammaticUpdateRef.current = false;
+    }, 100);
+
+    resetStream();
+  };
+
+  // Create delete handlers for each conversation
+  const deleteHandlers = new Map<string, () => Promise<void>>();
+  conversations.forEach((c) => {
+    deleteHandlers.set(c.id, () => onDelete(c.id));
+  });
+
+  const onDeleteAll = async () => {
     if (conversations.length === 0) return;
     const ok = await confirmAlert({
       title: "Delete All Conversations?",
@@ -384,21 +347,18 @@ export default function Command() {
       style: Toast.Style.Success,
       title: "All Conversations Deleted",
     });
-  }, [conversations.length, setCurrentId, save, resetStream]);
+  };
 
-  const handleSelectionChange = useCallback(
-    (id: string | null) => {
-      // Ignore ALL selection changes during programmatic updates
-      if (isProgrammaticUpdateRef.current) {
-        return;
-      }
-      // Only update if actually different
-      if (id && id !== currentId) {
-        setConversation(id);
-      }
-    },
-    [currentId, setConversation]
-  );
+  const handleSelectionChange = (id: string | null) => {
+    // Ignore ALL selection changes during programmatic updates
+    if (isProgrammaticUpdateRef.current) {
+      return;
+    }
+    // Only update if actually different
+    if (id && id !== currentId) {
+      setConversation(id);
+    }
+  };
 
   return (
     <List
