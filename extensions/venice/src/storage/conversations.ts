@@ -19,12 +19,19 @@ export type Conversation = {
 };
 
 /**
- * Loads conversations from LocalStorage.
+ * Loads conversations from Cache (synchronous) or LocalStorage (fallback).
+ * Reads cache first for instant access, then falls back to LocalStorage.
  *
  * @returns Array of conversations or undefined if not found/error
  */
 export async function loadConversationsFromStorage(): Promise<Conversation[] | undefined> {
   try {
+    // Try cache first (synchronous, instant)
+    const cached = cache.get(STORAGE_KEYS.CONVERSATIONS);
+    if (cached) {
+      return JSON.parse(cached) as Conversation[];
+    }
+    // Fall back to LocalStorage
     const raw = await LocalStorage.getItem<string>(STORAGE_KEYS.CONVERSATIONS);
     if (!raw) return undefined;
     return JSON.parse(raw) as Conversation[];
@@ -53,12 +60,19 @@ export async function writeConversationsStorage(conversations: Conversation[]): 
 }
 
 /**
- * Loads the last active conversation ID from LocalStorage.
+ * Loads the last active conversation ID from Cache (synchronous) or LocalStorage (fallback).
+ * Reads cache first for instant access, then falls back to LocalStorage.
  *
  * @returns The last conversation ID or undefined if not found
  */
 export async function loadLastConversationIdFromStorage(): Promise<string | undefined> {
   try {
+    // Try cache first (synchronous, instant)
+    const cached = cache.get(STORAGE_KEYS.LAST_CONVERSATION);
+    if (cached) {
+      return cached;
+    }
+    // Fall back to LocalStorage
     const id = await LocalStorage.getItem<string>(STORAGE_KEYS.LAST_CONVERSATION);
     return id ?? undefined;
   } catch {

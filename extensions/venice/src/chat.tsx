@@ -1,4 +1,4 @@
-import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
+import { ActionPanel, Action, Icon, List, showToast, Toast, LocalStorage, confirmAlert, Alert, LaunchProps } from "@raycast/api";
 import { useEffect, useState, useRef, useMemo } from "react";
 
 import { STORAGE_KEYS, UI_CONSTANTS } from "./constants";
@@ -77,7 +77,7 @@ function ConversationListItem({
   );
 }
 
-export default function Command() {
+export default function Command(props: LaunchProps<{ launchContext?: { conversationId?: string } }>) {
   const { model, models, error, isLoading: isLoadingModels } = useDefaultModel("chat");
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
   const { conversations, currentId, isInitializing, save, resolvePreferredModelId, setConversation, setCurrentId } =
@@ -99,6 +99,9 @@ export default function Command() {
 
   // Track when we're doing a programmatic update to ignore ALL onSelectionChange events
   const isProgrammaticUpdateRef = useRef(false);
+
+  // Track if we've handled the launch context to avoid doing it multiple times
+  const hasHandledLaunchContextRef = useRef(false);
 
   // Keep a ref to always have the latest conversations state for async callbacks
   const conversationsRef = useRef(conversations);
@@ -139,6 +142,39 @@ export default function Command() {
       setCustomSettingsModels(customModels);
     })();
   }, [models]);
+
+  // Handle launch context when a conversation is selected from Conversations view
+  useEffect(() => {
+    const contextConversationId = props.launchContext?.conversationId;
+
+    // Only handle once, and only if we have a conversation ID from launch context
+    if (hasHandledLaunchContextRef.current || !contextConversationId) {
+      return;
+    }
+
+    // Wait for conversations to be loaded
+    if (isInitializing || conversations.length === 0) {
+      return;
+    }
+
+    // Check if the conversation exists
+    const conversationExists = conversations.some((c) => c.id === contextConversationId);
+    if (conversationExists && contextConversationId !== currentId) {
+      // Mark as programmatic update to prevent triggering onSelectionChange
+      isProgrammaticUpdateRef.current = true;
+
+      // Set the conversation from launch context
+      setCurrentId(contextConversationId);
+
+      // Clear the programmatic flag after a brief moment
+      setTimeout(() => {
+        isProgrammaticUpdateRef.current = false;
+      }, 100);
+
+      // Mark as handled
+      hasHandledLaunchContextRef.current = true;
+    }
+  }, [conversations, currentId, isInitializing, props.launchContext?.conversationId, setCurrentId]);
 
   const currentConversation: Conversation | undefined = conversations.find((c) => c.id === currentId);
 

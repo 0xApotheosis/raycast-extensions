@@ -83,7 +83,11 @@ export default function Command() {
   filtered.forEach((c) => {
     openInChatHandlers.set(c.id, async () => {
       await writeLastConversationId(c.id);
-      await launchCommand({ name: "chat", type: LaunchType.UserInitiated });
+      await launchCommand({
+        name: "chat",
+        type: LaunchType.UserInitiated,
+        context: { conversationId: c.id }
+      });
     });
   });
 
