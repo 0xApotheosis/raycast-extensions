@@ -13,6 +13,7 @@ import type { VeniceModel, ModelSettings } from "../types";
 export function useChatStreaming() {
   const [stream, setStream] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [caretOn, setCaretOn] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -73,12 +74,13 @@ export function useChatStreaming() {
     streamBufferRef.current = "";
     setStream("");
     setIsStreaming(false);
+    setStreamingConversationId(null);
   };
 
   /**
    * Starts a new streaming session.
    */
-  const startStreaming = () => {
+  const startStreaming = (conversationId: string) => {
     // Clear any pending updates
     if (updateTimeoutRef.current) {
       clearTimeout(updateTimeoutRef.current);
@@ -88,6 +90,7 @@ export function useChatStreaming() {
     streamBufferRef.current = "";
     setStream("");
     setIsStreaming(true);
+    setStreamingConversationId(conversationId);
     abortRef.current?.abort();
     abortRef.current = new AbortController();
   };
@@ -116,7 +119,7 @@ export function useChatStreaming() {
     let assistantText = "";
 
     try {
-      startStreaming();
+      startStreaming(conversation.id);
 
       // Add user message to conversation
       const now = Date.now();
@@ -245,6 +248,7 @@ export function useChatStreaming() {
     setStream,
     isStreaming,
     setIsStreaming,
+    streamingConversationId,
     caretOn,
     abortRef,
     resetStream,

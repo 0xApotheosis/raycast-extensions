@@ -36,7 +36,7 @@ function ConversationListItem({
   onCancelStreaming: () => void;
 }) {
   const accessories = [];
-  if (isSelected && isStreaming) {
+  if (isStreaming) {
     accessories.push({ text: "Typing…" });
   }
   accessories.push({ text: formatRelativeTime(conversation.updatedAt) });
@@ -82,7 +82,7 @@ export default function Command() {
   const { currentModelId, setCurrentModelId } = useChatModel(models, model);
   const { conversations, currentId, save, resolvePreferredModelId, setConversation, setCurrentId } =
     useConversationManager();
-  const { stream, isStreaming, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming, isPending } =
+  const { stream, isStreaming, streamingConversationId, caretOn, resetStream, sendMessage, generateTitle, cancelStreaming, isPending } =
     useChatStreaming();
 
   const [searchText, setSearchText] = useState("");
@@ -416,7 +416,7 @@ export default function Command() {
             key={c.id}
             conversation={c}
             isSelected={c.id === currentId}
-            isStreaming={isStreaming}
+            isStreaming={isStreaming && c.id === streamingConversationId}
             markdown={c.id === currentId ? currentMarkdown : undefined}
             onSend={onSend}
             onNewChat={onNewChat}
